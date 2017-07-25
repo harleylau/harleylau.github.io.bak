@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  <title>Tornado 线程池应用 | Hexo Personal Blog</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="description" content="Tornado是一个异步框架，在异步操作的时候能提升程序的处理性能。但是如果在程序中碰到同步的逻辑，由于GIL的关系，会直接卡死，导致性能急剧下降。 目前对于mongodb以及redis都有比较不错的异步框架，但是对于Mysql，目前的异步框架都不是很成熟。 在实际应用中，由于已开始不是特别了解，在用了Tornado框架的同时，采用了Sqlalchemy来处理Mysql数据。但是由于这部分Mysq">
+<meta name="keywords" content="Tornado,Python">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Tornado 线程池应用">
+<meta property="og:url" content="https://harleylau.github.io/2017/07/25/Tornado-线程池应用/index.html">
+<meta property="og:site_name" content="Hexo Personal Blog">
+<meta property="og:description" content="Tornado是一个异步框架，在异步操作的时候能提升程序的处理性能。但是如果在程序中碰到同步的逻辑，由于GIL的关系，会直接卡死，导致性能急剧下降。 目前对于mongodb以及redis都有比较不错的异步框架，但是对于Mysql，目前的异步框架都不是很成熟。 在实际应用中，由于已开始不是特别了解，在用了Tornado框架的同时，采用了Sqlalchemy来处理Mysql数据。但是由于这部分Mysq">
+<meta property="og:updated_time" content="2017-07-25T11:04:21.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Tornado 线程池应用">
+<meta name="twitter:description" content="Tornado是一个异步框架，在异步操作的时候能提升程序的处理性能。但是如果在程序中碰到同步的逻辑，由于GIL的关系，会直接卡死，导致性能急剧下降。 目前对于mongodb以及redis都有比较不错的异步框架，但是对于Mysql，目前的异步框架都不是很成熟。 在实际应用中，由于已开始不是特别了解，在用了Tornado框架的同时，采用了Sqlalchemy来处理Mysql数据。但是由于这部分Mysq">
+  
+    <link rel="alternate" href="/atom.xml" title="Hexo Personal Blog" type="application/atom+xml">
+  
+  
+    <link rel="icon" href="/favicon.png">
+  
+  
+    <link href="//fonts.googleapis.com/css?family=Source+Code+Pro" rel="stylesheet" type="text/css">
+  
+  <link rel="stylesheet" href="/css/style.css">
+  
+
+</head>
+
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">Hexo Personal Blog</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+          <a id="nav-rss-link" class="nav-icon" href="/atom.xml" title="RSS Feed"></a>
+        
+        <a id="nav-search-btn" class="nav-icon" title="Search"></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="https://harleylau.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+      <div class="outer">
+        <section id="main"><article id="post-Tornado-线程池应用" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2017/07/25/Tornado-线程池应用/" class="article-date">
+  <time datetime="2017-07-25T10:24:51.000Z" itemprop="datePublished">2017-07-25</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="article-title" itemprop="name">
+      Tornado 线程池应用
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>Tornado是一个异步框架，在异步操作的时候能提升程序的处理性能。但是如果在程序中碰到同步的逻辑，由于GIL的关系，会直接卡死，导致性能急剧下降。</p>
+<p>目前对于mongodb以及redis都有比较不错的异步框架，但是对于Mysql，目前的异步框架都不是很成熟。</p>
+<p>在实际应用中，由于已开始不是特别了解，在用了Tornado框架的同时，采用了Sqlalchemy来处理Mysql数据。但是由于这部分Mysql操作是同步到，在并发量上去的时候，不能及时返回，大量请求被拒绝。</p>
+<p>由于替换Sqlalchemy会造成很大的工作量，经过研究之后发现Tornado有run_on_executor，可以利用线程池达到异步化的目的。</p>
+<blockquote>
+<p>Decorator to run a synchronous method asynchronously on an executor.</p>
+<p>The decorated method may be called with a callback keyword argument and returns a future.</p>
+<p>The IOLoop and executor to be used are determined by the io_loop and executor attributes of self. To use different attributes, pass keyword arguments to the decorator</p>
+</blockquote>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div></pre></td><td class="code"><pre><div class="line">#!/bin/env python</div><div class="line">import tornado.httpserver</div><div class="line">import tornado.ioloop</div><div class="line">import tornado.options</div><div class="line">import tornado.web</div><div class="line">import tornado.httpclient</div><div class="line">import tornado.gen</div><div class="line">from tornado.concurrent import run_on_executor</div><div class="line"># 这个并发库在python3自带;在python2需要安装sudo pip install futures</div><div class="line">from concurrent.futures import ThreadPoolExecutor</div><div class="line">import time</div><div class="line">from tornado.options import define, options</div><div class="line">define(&quot;port&quot;, default=8002, help=&quot;run on the given port&quot;, type=int)</div><div class="line"></div><div class="line">class SleepHandler(tornado.web.RequestHandler):</div><div class="line">    executor = ThreadPoolExecutor(2)</div><div class="line"></div><div class="line">    def get(self):</div><div class="line">        tornado.ioloop.IOLoop.instance().add_callback(self.sleep)       # 这样将在下一轮事件循环执行self.sleep</div><div class="line">        self.write(&quot;when i sleep&quot;)</div><div class="line"></div><div class="line">    @run_on_executor</div><div class="line">    def sleep(self):</div><div class="line">        time.sleep(5)</div><div class="line">        print(&quot;yes&quot;)</div><div class="line">        return 5</div><div class="line"></div><div class="line"></div><div class="line">if __name__ == &quot;__main__&quot;:</div><div class="line">    tornado.options.parse_command_line()</div><div class="line">    app = tornado.web.Application(handlers=[</div><div class="line">            (r&quot;/sleep&quot;, SleepHandler), ])</div><div class="line">    http_server = tornado.httpserver.HTTPServer(app)</div><div class="line">    http_server.listen(options.port)</div><div class="line">    tornado.ioloop.IOLoop.instance().start()</div></pre></td></tr></table></figure>
+<p>当然也可以用celery来达到异步的效果，但是不如run_on_executor来的方便</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="https://harleylau.github.io/2017/07/25/Tornado-线程池应用/" data-id="cj5jh19wu00018j67ybqb1385" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Python/">Python</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Tornado/">Tornado</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+  
+    <a href="/2017/07/25/Json-Web-Token/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">Json Web Token</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+</section>
+        
+          <aside id="sidebar">
+  
+    
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tags</h3>
+    <div class="widget">
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/JWT/">JWT</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Python/">Python</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Tornado/">Tornado</a></li></ul>
+    </div>
+  </div>
+
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Tag Cloud</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/JWT/" style="font-size: 10px;">JWT</a> <a href="/tags/Python/" style="font-size: 10px;">Python</a> <a href="/tags/Tornado/" style="font-size: 10px;">Tornado</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Archives</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">July 2017</a></li></ul>
+    </div>
+  </div>
+
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">Recent Posts</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2017/07/25/Tornado-线程池应用/">Tornado 线程池应用</a>
+          </li>
+        
+          <li>
+            <a href="/2017/07/25/Json-Web-Token/">Json Web Token</a>
+          </li>
+        
+          <li>
+            <a href="/2017/07/12/hello-world/">Hello World</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      &copy; 2017 Harley Liu<br>
+      Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+</nav>
+    
+
+<script src="//ajax.googleapis.com/ajax/libs/jquery/2.0.3/jquery.min.js"></script>
+
+
+  <link rel="stylesheet" href="/fancybox/jquery.fancybox.css">
+  <script src="/fancybox/jquery.fancybox.pack.js"></script>
+
+
+<script src="/js/script.js"></script>
+
+  </div>
+</body>
+</html>

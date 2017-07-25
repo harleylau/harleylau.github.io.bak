@@ -61,6 +61,55 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-Tornado-线程池应用" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2017/07/25/Tornado-线程池应用/" class="article-date">
+  <time datetime="2017-07-25T10:24:51.000Z" itemprop="datePublished">2017-07-25</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2017/07/25/Tornado-线程池应用/">Tornado 线程池应用</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>Tornado是一个异步框架，在异步操作的时候能提升程序的处理性能。但是如果在程序中碰到同步的逻辑，由于GIL的关系，会直接卡死，导致性能急剧下降。</p>
+<p>目前对于mongodb以及redis都有比较不错的异步框架，但是对于Mysql，目前的异步框架都不是很成熟。</p>
+<p>在实际应用中，由于已开始不是特别了解，在用了Tornado框架的同时，采用了Sqlalchemy来处理Mysql数据。但是由于这部分Mysql操作是同步到，在并发量上去的时候，不能及时返回，大量请求被拒绝。</p>
+<p>由于替换Sqlalchemy会造成很大的工作量，经过研究之后发现Tornado有run_on_executor，可以利用线程池达到异步化的目的。</p>
+<blockquote>
+<p>Decorator to run a synchronous method asynchronously on an executor.</p>
+<p>The decorated method may be called with a callback keyword argument and returns a future.</p>
+<p>The IOLoop and executor to be used are determined by the io_loop and executor attributes of self. To use different attributes, pass keyword arguments to the decorator</p>
+</blockquote>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div></pre></td><td class="code"><pre><div class="line">#!/bin/env python</div><div class="line">import tornado.httpserver</div><div class="line">import tornado.ioloop</div><div class="line">import tornado.options</div><div class="line">import tornado.web</div><div class="line">import tornado.httpclient</div><div class="line">import tornado.gen</div><div class="line">from tornado.concurrent import run_on_executor</div><div class="line"># 这个并发库在python3自带;在python2需要安装sudo pip install futures</div><div class="line">from concurrent.futures import ThreadPoolExecutor</div><div class="line">import time</div><div class="line">from tornado.options import define, options</div><div class="line">define(&quot;port&quot;, default=8002, help=&quot;run on the given port&quot;, type=int)</div><div class="line"></div><div class="line">class SleepHandler(tornado.web.RequestHandler):</div><div class="line">    executor = ThreadPoolExecutor(2)</div><div class="line"></div><div class="line">    def get(self):</div><div class="line">        tornado.ioloop.IOLoop.instance().add_callback(self.sleep)       # 这样将在下一轮事件循环执行self.sleep</div><div class="line">        self.write(&quot;when i sleep&quot;)</div><div class="line"></div><div class="line">    @run_on_executor</div><div class="line">    def sleep(self):</div><div class="line">        time.sleep(5)</div><div class="line">        print(&quot;yes&quot;)</div><div class="line">        return 5</div><div class="line"></div><div class="line"></div><div class="line">if __name__ == &quot;__main__&quot;:</div><div class="line">    tornado.options.parse_command_line()</div><div class="line">    app = tornado.web.Application(handlers=[</div><div class="line">            (r&quot;/sleep&quot;, SleepHandler), ])</div><div class="line">    http_server = tornado.httpserver.HTTPServer(app)</div><div class="line">    http_server.listen(options.port)</div><div class="line">    tornado.ioloop.IOLoop.instance().start()</div></pre></td></tr></table></figure>
+<p>当然也可以用celery来达到异步的效果，但是不如run_on_executor来的方便</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="https://harleylau.github.io/2017/07/25/Tornado-线程池应用/" data-id="cj5jh19wu00018j67ybqb1385" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Python/">Python</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Tornado/">Tornado</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-Json-Web-Token" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2017/07/25/Json-Web-Token/" class="article-date">
@@ -119,7 +168,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/25/Json-Web-Token/" data-id="cj5j8akwa0000kw67b7agns6o" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/25/Json-Web-Token/" data-id="cj5jh19wp00008j67w9i5o4i8" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JWT/">JWT</a></li></ul>
@@ -166,7 +215,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/12/hello-world/" data-id="cj5j8akwg0001kw67njtoh0te" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/12/hello-world/" data-id="cj5jh19x100038j679ahat2m3" class="article-share-link">Share</a>
       
       
     </footer>
@@ -188,7 +237,7 @@
   <div class="widget-wrap">
     <h3 class="widget-title">Tags</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/JWT/">JWT</a></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/JWT/">JWT</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Python/">Python</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Tornado/">Tornado</a></li></ul>
     </div>
   </div>
 
@@ -198,7 +247,7 @@
   <div class="widget-wrap">
     <h3 class="widget-title">Tag Cloud</h3>
     <div class="widget tagcloud">
-      <a href="/tags/JWT/" style="font-size: 10px;">JWT</a>
+      <a href="/tags/JWT/" style="font-size: 10px;">JWT</a> <a href="/tags/Python/" style="font-size: 10px;">Python</a> <a href="/tags/Tornado/" style="font-size: 10px;">Tornado</a>
     </div>
   </div>
 
@@ -218,6 +267,10 @@
     <h3 class="widget-title">Recent Posts</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2017/07/25/Tornado-线程池应用/">Tornado 线程池应用</a>
+          </li>
         
           <li>
             <a href="/2017/07/25/Json-Web-Token/">Json Web Token</a>
