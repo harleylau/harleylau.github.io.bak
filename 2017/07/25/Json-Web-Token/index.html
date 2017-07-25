@@ -3,14 +3,18 @@
 <head>
   <meta charset="utf-8">
   
-  <title>Hexo Personal Blog</title>
+  <title>Json Web Token | Hexo Personal Blog</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
-  <meta property="og:type" content="website">
-<meta property="og:title" content="Hexo Personal Blog">
-<meta property="og:url" content="https://harleylau.github.io/index.html">
+  <meta name="description" content="Token Auth机制JSON Web Token（JWT）是一个非常轻巧的规范。这个规范允许我们使用JWT在用户和服务器之间传递安全可靠的信息。 JWT通过用户发送用户名和密码给服务器，服务器验证通过之后，生成签名的token给客户端。客户端存储这个token，之后请求帐号相关的信息时带上token，服务端验证token之后，进行相应的处理。 相比cookie的优势支持跨域站点访问 Cooki">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Json Web Token">
+<meta property="og:url" content="https://harleylau.github.io/2017/07/25/Json-Web-Token/index.html">
 <meta property="og:site_name" content="Hexo Personal Blog">
+<meta property="og:description" content="Token Auth机制JSON Web Token（JWT）是一个非常轻巧的规范。这个规范允许我们使用JWT在用户和服务器之间传递安全可靠的信息。 JWT通过用户发送用户名和密码给服务器，服务器验证通过之后，生成签名的token给客户端。客户端存储这个token，之后请求帐号相关的信息时带上token，服务端验证token之后，进行相应的处理。 相比cookie的优势支持跨域站点访问 Cooki">
+<meta property="og:updated_time" content="2017-07-25T06:50:52.000Z">
 <meta name="twitter:card" content="summary">
-<meta name="twitter:title" content="Hexo Personal Blog">
+<meta name="twitter:title" content="Json Web Token">
+<meta name="twitter:description" content="Token Auth机制JSON Web Token（JWT）是一个非常轻巧的规范。这个规范允许我们使用JWT在用户和服务器之间传递安全可靠的信息。 JWT通过用户发送用户名和密码给服务器，服务器验证通过之后，生成签名的token给客户端。客户端存储这个token，之后请求帐号相关的信息时带上token，服务端验证token之后，进行相应的处理。 相比cookie的优势支持跨域站点访问 Cooki">
   
     <link rel="alternate" href="/atom.xml" title="Hexo Personal Blog" type="application/atom+xml">
   
@@ -59,9 +63,7 @@
   </div>
 </header>
       <div class="outer">
-        <section id="main">
-  
-    <article id="post-Json-Web-Token" class="article article-type-post" itemscope itemprop="blogPost">
+        <section id="main"><article id="post-Json-Web-Token" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2017/07/25/Json-Web-Token/" class="article-date">
   <time datetime="2017-07-25T03:13:15.000Z" itemprop="datePublished">2017-07-25</time>
@@ -74,8 +76,8 @@
       <header class="article-header">
         
   
-    <h1 itemprop="name">
-      <a class="article-title" href="/2017/07/25/Json-Web-Token/">Json Web Token</a>
+    <h1 class="article-title" itemprop="name">
+      Json Web Token
     </h1>
   
 
@@ -125,55 +127,19 @@
     </footer>
   </div>
   
-</article>
-
-
+    
+<nav id="article-nav">
   
-    <article id="post-hello-world" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2017/07/12/hello-world/" class="article-date">
-  <time datetime="2017-07-12T02:46:22.000Z" itemprop="datePublished">2017-07-12</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
   
-    <h1 itemprop="name">
-      <a class="article-title" href="/2017/07/12/hello-world/">Hello World</a>
-    </h1>
+    <a href="/2017/07/12/hello-world/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">Hello World</div>
+    </a>
   
+</nav>
 
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>Welcome to <a href="https://hexo.io/" target="_blank" rel="external">Hexo</a>! This is your very first post. Check <a href="https://hexo.io/docs/" target="_blank" rel="external">documentation</a> for more info. If you get any problems when using Hexo, you can find the answer in <a href="https://hexo.io/docs/troubleshooting.html" target="_blank" rel="external">troubleshooting</a> or you can ask me on <a href="https://github.com/hexojs/hexo/issues" target="_blank" rel="external">GitHub</a>.</p>
-<h2 id="Quick-Start"><a href="#Quick-Start" class="headerlink" title="Quick Start"></a>Quick Start</h2><h3 id="Create-a-new-post"><a href="#Create-a-new-post" class="headerlink" title="Create a new post"></a>Create a new post</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><div class="line">1</div></pre></td><td class="code"><pre><div class="line">$ hexo new <span class="string">"My New Post"</span></div></pre></td></tr></table></figure>
-<p>More info: <a href="https://hexo.io/docs/writing.html" target="_blank" rel="external">Writing</a></p>
-<h3 id="Run-server"><a href="#Run-server" class="headerlink" title="Run server"></a>Run server</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><div class="line">1</div></pre></td><td class="code"><pre><div class="line">$ hexo server</div></pre></td></tr></table></figure>
-<p>More info: <a href="https://hexo.io/docs/server.html" target="_blank" rel="external">Server</a></p>
-<h3 id="Generate-static-files"><a href="#Generate-static-files" class="headerlink" title="Generate static files"></a>Generate static files</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><div class="line">1</div></pre></td><td class="code"><pre><div class="line">$ hexo generate</div></pre></td></tr></table></figure>
-<p>More info: <a href="https://hexo.io/docs/generating.html" target="_blank" rel="external">Generating</a></p>
-<h3 id="Deploy-to-remote-sites"><a href="#Deploy-to-remote-sites" class="headerlink" title="Deploy to remote sites"></a>Deploy to remote sites</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><div class="line">1</div></pre></td><td class="code"><pre><div class="line">$ hexo deploy</div></pre></td></tr></table></figure>
-<p>More info: <a href="https://hexo.io/docs/deployment.html" target="_blank" rel="external">Deployment</a></p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/12/hello-world/" data-id="cj5j82zob0000jq678yfm40ys" class="article-share-link">Share</a>
-      
-      
-    </footer>
-  </div>
   
 </article>
-
-
-  
 
 </section>
         
