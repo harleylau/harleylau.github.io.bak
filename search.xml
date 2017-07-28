@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="utf-8"?>
+<search> 
+  
+    
+    <entry>
+      <title><![CDATA[Tornado 线程池应用]]></title>
+      <url>/2017/07/25/Tornado-%E7%BA%BF%E7%A8%8B%E6%B1%A0%E5%BA%94%E7%94%A8/</url>
+      <content type="html"><![CDATA[<p>Tornado是一个异步框架，在异步操作的时候能提升程序的处理性能。但是如果在程序中碰到同步的逻辑，由于GIL的关系，会直接卡死，导致性能急剧下降。</p>
+<p>目前对于mongodb以及redis都有比较不错的异步框架，但是对于Mysql，目前的异步框架都不是很成熟。</p>
+<p>在实际应用中，由于已开始不是特别了解，在用了Tornado框架的同时，采用了Sqlalchemy来处理Mysql数据。但是由于这部分Mysql操作是同步到，在并发量上去的时候，不能及时返回，大量请求被拒绝。</p>
+<p>由于替换Sqlalchemy会造成很大的工作量，经过研究之后发现Tornado有run_on_executor，可以利用线程池达到异步化的目的。</p>
+<blockquote>
+<p>Decorator to run a synchronous method asynchronously on an executor.</p>
+<p>The decorated method may be called with a callback keyword argument and returns a future.</p>
+<p>The IOLoop and executor to be used are determined by the io_loop and executor attributes of self. To use different attributes, pass keyword arguments to the decorator</p>
+</blockquote>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div></pre></td><td class="code"><pre><div class="line">#!/bin/env python</div><div class="line">import tornado.httpserver</div><div class="line">import tornado.ioloop</div><div class="line">import tornado.options</div><div class="line">import tornado.web</div><div class="line">import tornado.httpclient</div><div class="line">import tornado.gen</div><div class="line">from tornado.concurrent import run_on_executor</div><div class="line"># 这个并发库在python3自带;在python2需要安装sudo pip install futures</div><div class="line">from concurrent.futures import ThreadPoolExecutor</div><div class="line">import time</div><div class="line">from tornado.options import define, options</div><div class="line">define(&quot;port&quot;, default=8002, help=&quot;run on the given port&quot;, type=int)</div><div class="line"></div><div class="line">class SleepHandler(tornado.web.RequestHandler):</div><div class="line">    executor = ThreadPoolExecutor(2)</div><div class="line"></div><div class="line">    def get(self):</div><div class="line">        tornado.ioloop.IOLoop.instance().add_callback(self.sleep)       # 这样将在下一轮事件循环执行self.sleep</div><div class="line">        self.write(&quot;when i sleep&quot;)</div><div class="line"></div><div class="line">    @run_on_executor</div><div class="line">    def sleep(self):</div><div class="line">        time.sleep(5)</div><div class="line">        print(&quot;yes&quot;)</div><div class="line">        return 5</div><div class="line"></div><div class="line"></div><div class="line">if __name__ == &quot;__main__&quot;:</div><div class="line">    tornado.options.parse_command_line()</div><div class="line">    app = tornado.web.Application(handlers=[</div><div class="line">            (r&quot;/sleep&quot;, SleepHandler), ])</div><div class="line">    http_server = tornado.httpserver.HTTPServer(app)</div><div class="line">    http_server.listen(options.port)</div><div class="line">    tornado.ioloop.IOLoop.instance().start()</div></pre></td></tr></table></figure>
+<p>当然也可以用celery来达到异步的效果，但是不如run_on_executor来的方便</p>
+]]></content>
+      
+        
+        <tags>
+            
+            <tag> Tornado </tag>
+            
+            <tag> Python </tag>
+            
+        </tags>
+        
+    </entry>
+    
+    <entry>
+      <title><![CDATA[Json Web Token]]></title>
+      <url>/2017/07/25/Json-Web-Token/</url>
+      <content type="html"><![CDATA[<h2 id="Token-Auth机制"><a href="#Token-Auth机制" class="headerlink" title="Token Auth机制"></a>Token Auth机制</h2><p>JSON Web Token（JWT）是一个非常轻巧的规范。这个规范允许我们使用JWT在用户和服务器之间传递安全可靠的信息。</p>
+<p>JWT通过用户发送用户名和密码给服务器，服务器验证通过之后，生成签名的token给客户端。客户端存储这个token，之后请求帐号相关的信息时带上token，服务端验证token之后，进行相应的处理。</p>
+<h3 id="相比cookie的优势"><a href="#相比cookie的优势" class="headerlink" title="相比cookie的优势"></a>相比cookie的优势</h3><p><strong>支持跨域站点访问</strong></p>
+<p>Cookie是不允许垮域访问的，可以通过设置顶级域名的方式实现部分跨域，但是跨站点的访问仍然不支持。</p>
+<p>Token没有站点的限制，跨域站点的时候仍旧能够使用。</p>
+<p><strong>安全性更高</strong></p>
+<p>不需要考虑对CSRF（跨站请求伪造）的防范；</p>
+<h3 id="相比session的优势"><a href="#相比session的优势" class="headerlink" title="相比session的优势"></a>相比session的优势</h3><p><strong>节省服务器空间</strong></p>
+<p>session验证方式需要在服务端保存每个session，会占用服务器空间。如果单纯用DB存储，还有性能上的劣势；用redis等存储则不太经济。</p>
+<p>Token方式将成本分摊到各个客户端，所需要的仅仅是一个解编码的过程。</p>
+<h2 id="JWT的组成"><a href="#JWT的组成" class="headerlink" title="JWT的组成"></a>JWT的组成</h2><p>JWT由三部分组成，分别是头部、载荷和签名。三个部分中间用点分隔开，并且都使用 Base64 编码。</p>
+<p>总体JWT示例：<br><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div></pre></td><td class="code"><pre><div class="line">eyJ0eXAiOiAiSldUIiwiYWxnIjogIkhTMjU2In0.eyJpc3MiOiAiaGFybGV5IiwiaWF0IjogMTUwMDk1NTk1MCwiZXhwIjogMTUwMDk1Nzk4NywidXNlcl9pZCI6ICI3ODk4IiwidXNlcl9yb2xlIjoiQWRtaW4ifQ.b0998815569be8f4ca8518030c3d586cc5bdff12dd7ad0004a1c38fa735ce18a</div></pre></td></tr></table></figure></p>
+<h3 id="头部（Header）"><a href="#头部（Header）" class="headerlink" title="头部（Header）"></a>头部（Header）</h3><p>header 部分主要包括两部分，一个是 Token 的类型，另一个是使用的算法，<br>比如Token类型是 JWT，使用的算法是 HS256。</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div></pre></td><td class="code"><pre><div class="line">&#123;</div><div class="line">&quot;typ&quot;: &quot;JWT&quot;,</div><div class="line">&quot;alg&quot;: &quot;HS256&quot;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>经过base64编码之后的值为<br>eyJ0eXAiOiAiSldUIiwiYWxnIjogIkhTMjU2In0</p>
+<h3 id="有效载荷（payload）"><a href="#有效载荷（payload）" class="headerlink" title="有效载荷（payload）"></a>有效载荷（payload）</h3><p>有效载荷内部的数据可以自己定义，JWT规范也给出了一些标准字段，比如</p>
+<ul>
+<li>iss: 该JWT的签发者</li>
+<li>sub: 该JWT所面向的用户</li>
+<li>aud: 接收该JWT的一方</li>
+<li>exp(expires): 什么时候过期，这里是一个Unix时间戳</li>
+<li>iat(issued at): 在什么时候签发的</li>
+<li>jti(JWT ID）: 唯一的JWT ID</li>
+</ul>
+<p>比如payload内容如下：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div></pre></td><td class="code"><pre><div class="line">&#123;</div><div class="line">    &quot;iss&quot;: &quot;harley&quot;,</div><div class="line">    &quot;iat&quot;: 1500955950,</div><div class="line">    &quot;exp&quot;: 1500957987,</div><div class="line">    &quot;user_id&quot;: &quot;7898&quot;,</div><div class="line">    &quot;user_role&quot;: &quot;Admin&quot;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>base64加密后的结果为 eyJpc3MiOiAiaGFybGV5IiwiaWF0IjogMTUwMDk1NTk1MCwiZXhwIjogMTUwMDk1Nzk4NywidXNlcl9pZCI6ICI3ODk4IiwidXNlcl9yb2xlIjoiQWRtaW4ifQ</p>
+<h3 id="签名（signature）"><a href="#签名（signature）" class="headerlink" title="签名（signature）"></a>签名（signature）</h3><p>签名部分保证了token的安全性，signature的生成过程依赖前两部分的内容。<br>将Header和payload连接在一起，得到<br><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div></pre></td><td class="code"><pre><div class="line">eyJ0eXAiOiAiSldUIiwiYWxnIjogIkhTMjU2In0.eyJpc3MiOiAiaGFybGV5IiwiaWF0IjogMTUwMDk1NTk1MCwiZXhwIjogMTUwMDk1Nzk4NywidXNlcl9pZCI6ICI3ODk4IiwidXNlcl9yb2xlIjoiQWRtaW4ifQ</div></pre></td></tr></table></figure></p>
+<p>将上面拼接完的字符串用HS256算法进行加密。在加密的时候，还需要提供一个密钥。假设密钥为secret，那么就可以得到我们加密后的内容b0998815569be8f4ca8518030c3d586cc5bdff12dd7ad0004a1c38fa735ce18a</p>
+<p>加在后面得到完成JWT</p>
+<h2 id="JWT安全性"><a href="#JWT安全性" class="headerlink" title="JWT安全性"></a>JWT安全性</h2><p>JWT最后的签名部分对Header和payload进行了加密，如果Header和payload被篡改，最后的signature必然是不一样的。 由于加密时的secret是保密的，篡改者无法得到正确的签名。</p>
+<p>但同时要注意的是，由于header和payload部分并未加密，所以不能把敏感信息放入其中。</p>
+]]></content>
+      
+        
+        <tags>
+            
+            <tag> JWT </tag>
+            
+        </tags>
+        
+    </entry>
+    
+    <entry>
+      <title><![CDATA[Hello World]]></title>
+      <url>/2017/07/12/hello-world/</url>
+      <content type="html"><![CDATA[<p>Welcome to <a href="https://hexo.io/" target="_blank" rel="external">Hexo</a>! This is your very first post. Check <a href="https://hexo.io/docs/" target="_blank" rel="external">documentation</a> for more info. If you get any problems when using Hexo, you can find the answer in <a href="https://hexo.io/docs/troubleshooting.html" target="_blank" rel="external">troubleshooting</a> or you can ask me on <a href="https://github.com/hexojs/hexo/issues" target="_blank" rel="external">GitHub</a>.</p>
+<h2 id="Quick-Start"><a href="#Quick-Start" class="headerlink" title="Quick Start"></a>Quick Start</h2><h3 id="Create-a-new-post"><a href="#Create-a-new-post" class="headerlink" title="Create a new post"></a>Create a new post</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><div class="line">1</div></pre></td><td class="code"><pre><div class="line">$ hexo new <span class="string">"My New Post"</span></div></pre></td></tr></table></figure>
+<p>More info: <a href="https://hexo.io/docs/writing.html" target="_blank" rel="external">Writing</a></p>
+<h3 id="Run-server"><a href="#Run-server" class="headerlink" title="Run server"></a>Run server</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><div class="line">1</div></pre></td><td class="code"><pre><div class="line">$ hexo server</div></pre></td></tr></table></figure>
+<p>More info: <a href="https://hexo.io/docs/server.html" target="_blank" rel="external">Server</a></p>
+<h3 id="Generate-static-files"><a href="#Generate-static-files" class="headerlink" title="Generate static files"></a>Generate static files</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><div class="line">1</div></pre></td><td class="code"><pre><div class="line">$ hexo generate</div></pre></td></tr></table></figure>
+<p>More info: <a href="https://hexo.io/docs/generating.html" target="_blank" rel="external">Generating</a></p>
+<h3 id="Deploy-to-remote-sites"><a href="#Deploy-to-remote-sites" class="headerlink" title="Deploy to remote sites"></a>Deploy to remote sites</h3><figure class="highlight bash"><table><tr><td class="gutter"><pre><div class="line">1</div></pre></td><td class="code"><pre><div class="line">$ hexo deploy</div></pre></td></tr></table></figure>
+<p>More info: <a href="https://hexo.io/docs/deployment.html" target="_blank" rel="external">Deployment</a></p>
+]]></content>
+      
+        
+    </entry>
+    
+  
+  
+</search>
