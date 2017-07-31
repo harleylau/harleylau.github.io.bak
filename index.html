@@ -102,11 +102,48 @@
 <p>len表示已使用的长度， alloc表示分配的长度，包括header的长度和终止符，flag用来标记header的类型。</p>
 <h3 id="SDS复制函数"><a href="#SDS复制函数" class="headerlink" title="SDS复制函数"></a>SDS复制函数</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div></pre></td><td class="code"><pre><div class="line">/* Duplicate an sds string. */</div><div class="line">//输入sds， 返回复制成功后的地址</div><div class="line">sds sdsdup(const sds s) &#123;</div><div class="line">    return sdsnewlen(s, sdslen(s));</div><div class="line">&#125;</div></pre></td></tr></table></figure>
 <h3 id="SDS释放函数"><a href="#SDS释放函数" class="headerlink" title="SDS释放函数"></a>SDS释放函数</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div></pre></td><td class="code"><pre><div class="line">/* Free an sds string. No operation is performed if &apos;s&apos; is NULL. */</div><div class="line">void sdsfree(sds s) &#123;</div><div class="line">    if (s == NULL) return;</div><div class="line">    s_free((char*)s-sdsHdrSize(s[-1]));</div><div class="line">    //s[-1] 得到header中的flag， 然后通过sdsHdrSize获得header的大小， 相减得到header的地址</div><div class="line">    //s_free释放</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<h3 id="SDS扩容函数"><a href="#SDS扩容函数" class="headerlink" title="SDS扩容函数"></a>SDS扩容函数</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div><div class="line">36</div><div class="line">37</div><div class="line">38</div><div class="line">39</div><div class="line">40</div><div class="line">41</div><div class="line">42</div><div class="line">43</div><div class="line">44</div><div class="line">45</div><div class="line">46</div><div class="line">47</div><div class="line">48</div><div class="line">49</div><div class="line">50</div><div class="line">51</div><div class="line">52</div><div class="line">53</div><div class="line">54</div><div class="line">55</div><div class="line">56</div><div class="line">57</div><div class="line">58</div><div class="line">59</div></pre></td><td class="code"><pre><div class="line">/* Enlarge the free space at the end of the sds string so that the caller</div><div class="line"> * is sure that after calling this function can overwrite up to addlen</div><div class="line"> * bytes after the end of the string, plus one more byte for nul term.</div><div class="line"> *</div><div class="line"> * Note: this does not change the *length* of the sds string as returned</div><div class="line"> * by sdslen(), but only the free buffer space we have. */</div><div class="line">sds sdsMakeRoomFor(sds s, size_t addlen) &#123;</div><div class="line">    void *sh, *newsh;</div><div class="line">    // 获取 s 目前的空余空间长度</div><div class="line">    size_t avail = sdsavail(s);</div><div class="line">    size_t len, newlen;</div><div class="line">    char type, oldtype = s[-1] &amp; SDS_TYPE_MASK;</div><div class="line">    int hdrlen;</div><div class="line"></div><div class="line">    // s 目前的空余空间已经足够，无须再进行扩展，直接返回</div><div class="line">    /* Return ASAP if there is enough space left. */</div><div class="line">    if (avail &gt;= addlen) return s;</div><div class="line"></div><div class="line">    len = sdslen(s);</div><div class="line">    sh = (char*)s-sdsHdrSize(oldtype);</div><div class="line">    // s 最少需要的长度</div><div class="line">    newlen = (len+addlen);</div><div class="line">    if (newlen &lt; SDS_MAX_PREALLOC)</div><div class="line">        // 如果新长度小于 SDS_MAX_PREALLOC </div><div class="line">        // 那么为它分配两倍于所需长度的空间</div><div class="line">        newlen *= 2;</div><div class="line">    else</div><div class="line">        // 否则，分配长度为目前长度加上 SDS_MAX_PREALLOC</div><div class="line">        newlen += SDS_MAX_PREALLOC;</div><div class="line"></div><div class="line">    // 得到新的type类型</div><div class="line">    type = sdsReqType(newlen);</div><div class="line"></div><div class="line">    /* Don&apos;t use type 5: the user is appending to the string and type 5 is</div><div class="line">     * not able to remember empty space, so sdsMakeRoomFor() must be called</div><div class="line">     * at every appending operation. */</div><div class="line">    if (type == SDS_TYPE_5) type = SDS_TYPE_8;</div><div class="line"></div><div class="line">    hdrlen = sdsHdrSize(type);</div><div class="line">    if (oldtype==type) &#123;</div><div class="line">        // 如果前后类型不变, 无需更改header，realloc</div><div class="line">        newsh = s_realloc(sh, hdrlen+newlen+1);</div><div class="line">        if (newsh == NULL) return NULL;</div><div class="line">        s = (char*)newsh+hdrlen;</div><div class="line">    &#125; else &#123;</div><div class="line">        /* Since the header size changes, need to move the string forward,</div><div class="line">         * and can&apos;t use realloc */</div><div class="line">        newsh = s_malloc(hdrlen+newlen+1);</div><div class="line">        if (newsh == NULL) return NULL;</div><div class="line">        memcpy((char*)newsh+hdrlen, s, len+1);</div><div class="line">        s_free(sh);</div><div class="line">        s = (char*)newsh+hdrlen;</div><div class="line">        s[-1] = type;</div><div class="line">        sdssetlen(s, len);</div><div class="line">    &#125;</div><div class="line">    // 重新设置header中的alloc参数</div><div class="line">    sdssetalloc(s, newlen);</div><div class="line">    return s;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<ul>
+<li>当要增加字符在SDS之后的时候，先判断目前的剩余长度是否满足条件，如果慢煮条件，直接将字符串添加在后边</li>
+<li>如果当前的剩余空间不够，需要对SDS进行扩容。如果对 SDS 进行修改之后， SDS 的长度（也即是 len 属性的值）将小于 1 MB ， 那么程序分配和 len 属性同样大小的未使用空间， 这时 SDS len 属性的值将和 free 属性的值相同。 举个例子， 如果进行修改之后， SDS 的 len 将变成 13 字节， 那么程序也会分配 13 字节的未使用空间， SDS 的 buf 数组的实际长度将变成 13 + 13 + 1 = 27 字节（额外的一字节用于保存空字符）。</li>
+<li>如果对 SDS 进行修改之后， SDS 的长度将大于等于 1 MB ， 那么程序会分配 1 MB 的未使用空间。 比如， 如果进行修改之后， SDS 的 len 将变成 30 MB ， 那么程序会分配 1 MB 的未使用空间， SDS 的 buf 数组的实际长度将为 30 MB + 1 MB + 1 byte 。</li>
+</ul>
+<h2 id="SDS小结"><a href="#SDS小结" class="headerlink" title="SDS小结"></a>SDS小结</h2><p>SDS提供了一系列函数，不一一列出。 参考《redis设计与实现》一书的说明，SDS与C字符串的区别如下</p>
+<table>
+<thead>
+<tr>
+<th>C 字符串</th>
+<th>SDS</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>获取字符串长度的复杂度为 O(N) 。</td>
+<td>获取字符串长度的复杂度为 O(1) 。</td>
+</tr>
+<tr>
+<td>API 是不安全的，可能会造成缓冲区溢出。</td>
+<td>API 是安全的，不会造成缓冲区溢出。</td>
+</tr>
+<tr>
+<td>修改字符串长度 N 次必然需要执行 N 次内存重分配。</td>
+<td>修改字符串长度 N 次最多需要执行 N 次内存重分配。</td>
+</tr>
+<tr>
+<td>只能保存文本数据。</td>
+<td>可以保存文本或者二进制数据。</td>
+</tr>
+<tr>
+<td>可以使用所有 <string.h> 库中的函数。</string.h></td>
+<td>可以使用一部分 <string.h> 库中的函数。</string.h></td>
+</tr>
+</tbody>
+</table>
 
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/28/Redis源码剖析-简单动态字符串sds/" data-id="cj5nq90oh0000yc674yo0w92g" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/28/Redis源码剖析-简单动态字符串sds/" data-id="cj5rn22hp0001qu67fsn2yopc" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
@@ -155,7 +192,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/25/Tornado-线程池应用/" data-id="cj5nq90pa0005yc67edqrvsb3" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/25/Tornado-线程池应用/" data-id="cj5rn22hw0003qu679wtan5an" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Python/">Python</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Tornado/">Tornado</a></li></ul>
@@ -225,7 +262,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/25/Json-Web-Token/" data-id="cj5nq90pc0006yc67foain106" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/25/Json-Web-Token/" data-id="cj5rn22hj0000qu67v3070lwb" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JWT/">JWT</a></li></ul>
@@ -272,7 +309,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/12/hello-world/" data-id="cj5nq90pv000dyc67uavxersc" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/12/hello-world/" data-id="cj5rn22hx0004qu67d5swa5bo" class="article-share-link">Share</a>
       
       
     </footer>
