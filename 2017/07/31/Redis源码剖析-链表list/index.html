@@ -6,12 +6,13 @@
   <title>Redis源码剖析-链表list | Harley_Lau</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <meta name="description" content="Redis另一个基础的数据结构是链表，C并没有内置的链表结构，因此Redis自己实现了一个列表。 除了链表键之外， 发布与订阅、慢查询、监视器等功能也用到了链表， Redis 服务器本身还使用链表来保存多个客户端的状态信息， 以及使用链表来构建客户端输出缓冲区。 List结构双端链表结点定义如下： 12345typedef struct listNode &amp;#123;    struct list">
+<meta name="keywords" content="redis,源码">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Redis源码剖析-链表list">
 <meta property="og:url" content="https://harleylau.github.io/2017/07/31/Redis源码剖析-链表list/index.html">
 <meta property="og:site_name" content="Harley_Lau">
 <meta property="og:description" content="Redis另一个基础的数据结构是链表，C并没有内置的链表结构，因此Redis自己实现了一个列表。 除了链表键之外， 发布与订阅、慢查询、监视器等功能也用到了链表， Redis 服务器本身还使用链表来保存多个客户端的状态信息， 以及使用链表来构建客户端输出缓冲区。 List结构双端链表结点定义如下： 12345typedef struct listNode &amp;#123;    struct list">
-<meta property="og:updated_time" content="2017-07-31T07:36:50.000Z">
+<meta property="og:updated_time" content="2017-07-31T07:37:23.000Z">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="Redis源码剖析-链表list">
 <meta name="twitter:description" content="Redis另一个基础的数据结构是链表，C并没有内置的链表结构，因此Redis自己实现了一个列表。 除了链表键之外， 发布与订阅、慢查询、监视器等功能也用到了链表， Redis 服务器本身还使用链表来保存多个客户端的状态信息， 以及使用链表来构建客户端输出缓冲区。 List结构双端链表结点定义如下： 12345typedef struct listNode &amp;#123;    struct list">
@@ -110,9 +111,11 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/31/Redis源码剖析-链表list/" data-id="cj5rudb4000034k6739gmmih1" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/31/Redis源码剖析-链表list/" data-id="cj5rudykj00035767l3l5quae" class="article-share-link">Share</a>
       
       
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
+
     </footer>
   </div>
   
@@ -151,7 +154,7 @@
   <div class="widget-wrap">
     <h3 class="widget-title">标签云</h3>
     <div class="widget tagcloud">
-      <a href="/tags/JWT/" style="font-size: 10px;">JWT</a> <a href="/tags/Python/" style="font-size: 10px;">Python</a> <a href="/tags/Tornado/" style="font-size: 10px;">Tornado</a> <a href="/tags/redis/" style="font-size: 10px;">redis</a> <a href="/tags/源码/" style="font-size: 10px;">源码</a>
+      <a href="/tags/JWT/" style="font-size: 10px;">JWT</a> <a href="/tags/Python/" style="font-size: 10px;">Python</a> <a href="/tags/Tornado/" style="font-size: 10px;">Tornado</a> <a href="/tags/redis/" style="font-size: 20px;">redis</a> <a href="/tags/源码/" style="font-size: 20px;">源码</a>
     </div>
   </div>
 
