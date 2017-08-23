@@ -61,6 +61,73 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-Redis源码剖析-dict遍历算法" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2017/08/02/Redis源码剖析-dict遍历算法/" class="article-date">
+  <time datetime="2017-08-02T08:08:16.000Z" itemprop="datePublished">2017-08-02</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2017/08/02/Redis源码剖析-dict遍历算法/">Redis源码剖析-dict遍历算法</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>先贴一下整体的代码</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div><div class="line">36</div><div class="line">37</div><div class="line">38</div><div class="line">39</div><div class="line">40</div><div class="line">41</div><div class="line">42</div><div class="line">43</div><div class="line">44</div><div class="line">45</div><div class="line">46</div><div class="line">47</div><div class="line">48</div><div class="line">49</div><div class="line">50</div><div class="line">51</div><div class="line">52</div><div class="line">53</div><div class="line">54</div><div class="line">55</div><div class="line">56</div><div class="line">57</div><div class="line">58</div><div class="line">59</div><div class="line">60</div><div class="line">61</div><div class="line">62</div><div class="line">63</div><div class="line">64</div><div class="line">65</div><div class="line">66</div><div class="line">67</div><div class="line">68</div><div class="line">69</div><div class="line">70</div><div class="line">71</div><div class="line">72</div><div class="line">73</div><div class="line">74</div><div class="line">75</div><div class="line">76</div><div class="line">77</div><div class="line">78</div><div class="line">79</div><div class="line">80</div></pre></td><td class="code"><pre><div class="line">unsigned long dictScan(dict *d,</div><div class="line">                       unsigned long v,</div><div class="line">                       dictScanFunction *fn,</div><div class="line">                       dictScanBucketFunction* bucketfn,</div><div class="line">                       void *privdata)</div><div class="line">&#123;</div><div class="line">    dictht *t0, *t1;</div><div class="line">    const dictEntry *de, *next;</div><div class="line">    unsigned long m0, m1;</div><div class="line"></div><div class="line">    // 跳过空字典</div><div class="line">    if (dictSize(d) == 0) return 0;</div><div class="line"></div><div class="line">    // 如果没有rehash，迭代一个哈希表的字典</div><div class="line">    if (!dictIsRehashing(d)) &#123;</div><div class="line">        t0 = &amp;(d-&gt;ht[0]);</div><div class="line">        m0 = t0-&gt;sizemask;</div><div class="line"></div><div class="line">        /* Emit entries at cursor */</div><div class="line">        if (bucketfn) bucketfn(privdata, &amp;t0-&gt;table[v &amp; m0]);</div><div class="line">        de = t0-&gt;table[v &amp; m0];</div><div class="line">        while (de) &#123;</div><div class="line">            next = de-&gt;next;</div><div class="line">            fn(privdata, de);</div><div class="line">            de = next;</div><div class="line">        &#125;</div><div class="line">    // 迭代有两个哈希表的字典</div><div class="line">    &#125; else &#123;</div><div class="line">        t0 = &amp;d-&gt;ht[0];</div><div class="line">        t1 = &amp;d-&gt;ht[1];</div><div class="line"></div><div class="line">        /* Make sure t0 is the smaller and t1 is the bigger table */</div><div class="line">        // 确保 t0 比 t1 要小</div><div class="line">        if (t0-&gt;size &gt; t1-&gt;size) &#123;</div><div class="line">            t0 = &amp;d-&gt;ht[1];</div><div class="line">            t1 = &amp;d-&gt;ht[0];</div><div class="line">        &#125;</div><div class="line"></div><div class="line">        m0 = t0-&gt;sizemask;</div><div class="line">        m1 = t1-&gt;sizemask;</div><div class="line"></div><div class="line">        /* Emit entries at cursor */</div><div class="line">        if (bucketfn) bucketfn(privdata, &amp;t0-&gt;table[v &amp; m0]);</div><div class="line">        de = t0-&gt;table[v &amp; m0];</div><div class="line">        while (de) &#123;</div><div class="line">            next = de-&gt;next;</div><div class="line">            fn(privdata, de);</div><div class="line">            de = next;</div><div class="line">        &#125;</div><div class="line"></div><div class="line">        /* Iterate over indices in larger table that are the expansion</div><div class="line">         * of the index pointed to by the cursor in the smaller table */</div><div class="line">        do &#123;</div><div class="line">            /* Emit entries at cursor */</div><div class="line">            if (bucketfn) bucketfn(privdata, &amp;t1-&gt;table[v &amp; m1]);</div><div class="line">            de = t1-&gt;table[v &amp; m1];</div><div class="line">            while (de) &#123;</div><div class="line">                next = de-&gt;next;</div><div class="line">                fn(privdata, de);</div><div class="line">                de = next;</div><div class="line">            &#125;</div><div class="line"></div><div class="line">            /* Increment bits not covered by the smaller mask */</div><div class="line">            v = (((v | m0) + 1) &amp; ~m0) | (v &amp; m0);</div><div class="line"></div><div class="line">            /* Continue while bits covered by mask difference is non-zero */</div><div class="line">        &#125; while (v &amp; (m0 ^ m1));</div><div class="line">    &#125;</div><div class="line"></div><div class="line">    /* Set unmasked bits so incrementing the reversed cursor</div><div class="line">     * operates on the masked bits of the smaller table */</div><div class="line">    v |= ~m0;</div><div class="line"></div><div class="line">    /* Increment the reverse cursor */</div><div class="line">    v = rev(v);</div><div class="line">    v++;</div><div class="line">    v = rev(v);</div><div class="line"></div><div class="line">    return v;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>Redis的dict结构中，有一个遍历dict的函数，因为该遍历函数的算法比较特别，值得单独拿出来研究一下。</p>
+<p>首先考虑最简单的情况， 如果一个dict是稳定，即没有扩大缩小，也没有正好处于rehash的过程中，那么这种情况下的遍历是最简单的， 只需要按照索引值顺序遍历第一个hash表ht[0]就行。 </p>
+<p>但是如果本次索引的遍历的时候，跟上一个索引遍历的时候，dict已经经过了扩大或者缩小，或者dict正好处于rehash的过程中的时候，遍历过程就变复杂了。</p>
+<p>如果仍旧采用顺序遍历索引的策略，考虑dict经过缩小的情况。如果hash表一共有8个slot，经过扩大变成了4个slot，在计算索引的时候，都是hash值同mask=size-1做与操作。所以如果某个key的hash值最后原来是7的话，在slot=8的时候，应该放到索引为7的slot，但是缩小到4个slot的时候，将被放在slot=3。可以想见，这种情况下，会有大量的key被漏掉。同样，如果经过了扩大，也会有大量的key被重复遍历。</p>
+<h2 id="dict的反向二进制位遍历"><a href="#dict的反向二进制位遍历" class="headerlink" title="dict的反向二进制位遍历"></a>dict的反向二进制位遍历</h2><p>Redis的遍历方式采用了反向的二进制位遍历。那么什么是反向二进制位遍历呢。按照正常的遍历逻辑，遍历的顺序是按照0-&gt;1-&gt;2-&gt;3-&gt;4….</p>
+<p>但是dictScan采用的顺序，以8个slot为例，是0-&gt;4-&gt;2-&gt;6-&gt;1-&gt;5-&gt;3-&gt;7。看着貌似没有规律，但是其实是从高位开始，向低位进位的一种遍历方式，用二进制更能直观的看出来</p>
+ <figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div></pre></td><td class="code"><pre><div class="line">000 --&gt; 100 --&gt; 010 --&gt; 110 --&gt; 001 --&gt; 101 --&gt; 011 --&gt; 111 --&gt; 000</div></pre></td></tr></table></figure>
+<p> 那么用这种方式遍历会有什么好处呢，可以按照dict不同状态的示例来说明</p>
+<h3 id="1、当dict稳定的时候"><a href="#1、当dict稳定的时候" class="headerlink" title="1、当dict稳定的时候"></a>1、当dict稳定的时候</h3><p>这种情况下，从上面的说明能看出，反向二进制遍历同正向二进制遍历一样，能够遍历到所有的索引，并且不会有重复或遗漏</p>
+<h3 id="2、当dict扩大的时候"><a href="#2、当dict扩大的时候" class="headerlink" title="2、当dict扩大的时候"></a>2、当dict扩大的时候</h3><p>假设dict的slot由8个扩大到16个，首先列出两种状态下的遍历顺序：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div></pre></td><td class="code"><pre><div class="line">000 --&gt; 100 --&gt; 010 --&gt; 110 --&gt; 001 --&gt; 101 --&gt; 011 --&gt; 111 --&gt; 000     </div><div class="line">  </div><div class="line">0000 --&gt; 1000 --&gt; 0100 --&gt; 1100 --&gt; 0010 --&gt; 1010 --&gt; 0110 --&gt; 1110 --&gt; 0001 --&gt; 1001 --&gt; 0101 --&gt; 1101 --&gt; 0011 --&gt; 1011 --&gt; 0111 --&gt; 1111 --&gt; 0000</div></pre></td></tr></table></figure>
+<p>假设在slot=8的时候已经遍历完了010的索引，下一次就需要遍历110的索引。此时dict发生了rehash操作，slot从8个扩展到了16个，</p>
+<p>在slot=16的情况下，就需要遍历0110的索引。 此时，在slot=8的时候遍历过的所以值为000，100，010，对应到slot=16的情况下，分别是0000，1000， 0100，1100， 0010， 1010， 正好是所以址0110的前序所以， 这样的话，整个遍历流程，不会造成遍历的重复或者遗漏。</p>
+<h3 id="3、当dict缩小的时候"><a href="#3、当dict缩小的时候" class="headerlink" title="3、当dict缩小的时候"></a>3、当dict缩小的时候</h3><p>假设在slot=16的是，已经遍历完了0110的索引，下一个就要遍历1110的索引，此时dict缩小到了slot=8 。此前已经遍历过的所有索引分别为 0000， 1000， 0100， 1100， 0010， 1010， 0110， 对应到slot=8的情况下，分别落到索引000，100，010，110。 </p>
+<p>此时需要从110的所以开始遍历，但是由于此前在slot=16的时候已经遍历过的0110的索引值也是落到110的索引，所以会造成一部分的key被重复遍历。</p>
+<p>原哈希表长度为x，缩小后长度为y，则最多会有x/y – 1个原bucket的节点会被重复迭代。比如由16缩小为8，则最多就有1个bucket节点会重复迭代，要是由32缩小为8，则最多会有3个。</p>
+<p>但是，也有可能，正好不重复遍历，比如slot=16的时候遍历到1010，即将遍历0110的时候dict缩小的时候，就不会产生重复。</p>
+<p>反向二进制算法保证了dict不会遗漏元素，同时在dict缩小的时候，保证了比较小的元素重复。</p>
+<h3 id="4、正好进行rehash的时候"><a href="#4、正好进行rehash的时候" class="headerlink" title="4、正好进行rehash的时候"></a>4、正好进行rehash的时候</h3><p>当dict正好在进行rehash的时候，当前遍历的索引里边可能数据不全，因为有一部分已经rehash到新表中去了。所以为了不漏掉元素，采取的措施是同时遍历两个hash表的对应索引。</p>
+<p>但是rehash的过程中，不管扩大还是缩小，两张表的索引都是不同的，如何对应呢。 方法就是先比较两张hash表的大小，先遍历较小的hash表，遍历完之后，找到大表中所有对应的索引值，全部依次遍历。</p>
+<p>举个例子，暂且不管dict当前是在扩大还是缩小，两张hash表的大小肯定是不同的。假设一张表的slot=8，另一张表的slot=32， 两个mask分别为111和11111。 假设当前的hash值同111做与操作之后为010，那么小表中010的索引遍历之后，需要遍历大表的00010，01010， 10010和11010的索引，然后将两者的索引一块返回。</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div></pre></td><td class="code"><pre><div class="line">v = (((v | m0) + 1) &amp; ~m0) | (v &amp; m0);</div></pre></td></tr></table></figure>
+<p>那么如何保证大表对应的所有索引都能遍历到呢。代码中可以看到这么一条语句，分析一下。 v | m0 将v的低位全部置为1， (v | m0) + 1则是将v的高位加1，之后再 &amp; ~m0 将所有低位置0， v &amp; m0 就是将v的低位提取出来放到之前的数值之后。 这样就能够： 保持v的低位不变，高位持续加1，遍历所有扩展后的slot</p>
+<p>那么高位什么时候停止加1呢，就是while终止的条件</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div></pre></td><td class="code"><pre><div class="line">while (v &amp; (m0 ^ m1))</div></pre></td></tr></table></figure>
+<p>由于m0和m1都是全为1的mask，假设m0=111， m1=11111， 那么m0 ^ m1 = 11000， 所以我们能看到当v的高位没有1了，其实就是说到头了，循环就会终止。</p>
+<h2 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h2><p>Redis的dictScan通过反向二进制位的遍历顺序，既能防止漏掉遍历元素，也能在必须要重复遍历元素的时候，减少重复元素的个数。 同时在处理rehash操作时的遍历的时候，通过各种位操作的结合，使得rehash过程中不会漏掉元素。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="https://harleylau.github.io/2017/08/02/Redis源码剖析-dict遍历算法/" data-id="cj6omx38c00001767wflyui8r" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-Redis源码剖析-dict字典" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2017/07/31/Redis源码剖析-dict字典/" class="article-date">
@@ -118,9 +185,11 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/31/Redis源码剖析-dict字典/" data-id="cj5uq6fgl0001u4674cc81zuq" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/31/Redis源码剖析-dict字典/" data-id="cj6omx38r00041767klh1fig1" class="article-share-link">Share</a>
       
       
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
+
     </footer>
   </div>
   
@@ -175,7 +244,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/31/Redis源码剖析-链表list/" data-id="cj5uq6fgs0004u467yqy4xatc" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/31/Redis源码剖析-链表list/" data-id="cj6omx38v00051767rkvno4sv" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
@@ -269,7 +338,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/28/Redis源码剖析-简单动态字符串sds/" data-id="cj5uq6fgq0003u4674zdyotgu" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/28/Redis源码剖析-简单动态字符串sds/" data-id="cj6omx38q000317673h4w9i18" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
@@ -318,7 +387,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/25/Tornado-线程池应用/" data-id="cj5uq6fh20008u4678ak3ac1i" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/25/Tornado-线程池应用/" data-id="cj6omx39300081767uc1aw5d5" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Python/">Python</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Tornado/">Tornado</a></li></ul>
@@ -388,7 +457,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/25/Json-Web-Token/" data-id="cj5uq6fgg0000u467p0w4be7w" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/25/Json-Web-Token/" data-id="cj6omx38k000117672jq3kkrf" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JWT/">JWT</a></li></ul>
@@ -435,7 +504,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/12/hello-world/" data-id="cj5uq6fgw0005u467uknmd9dk" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/12/hello-world/" data-id="cj6omx38z00071767z0l75uxc" class="article-share-link">Share</a>
       
       
     </footer>
@@ -476,7 +545,7 @@
   <div class="widget-wrap">
     <h3 class="widget-title">归档</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">七月 2017</a></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">八月 2017</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">七月 2017</a></li></ul>
     </div>
   </div>
 
@@ -487,6 +556,10 @@
     <h3 class="widget-title">最新文章</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2017/08/02/Redis源码剖析-dict遍历算法/">Redis源码剖析-dict遍历算法</a>
+          </li>
         
           <li>
             <a href="/2017/07/31/Redis源码剖析-dict字典/">Redis源码剖析-dict字典</a>
@@ -502,10 +575,6 @@
         
           <li>
             <a href="/2017/07/25/Tornado-线程池应用/">Tornado 线程池应用</a>
-          </li>
-        
-          <li>
-            <a href="/2017/07/25/Json-Web-Token/">Json Web Token</a>
           </li>
         
       </ul>

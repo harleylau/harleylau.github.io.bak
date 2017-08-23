@@ -6,13 +6,14 @@
   <title>Redis源码剖析-dict字典 | Harley_Lau</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <meta name="description" content="改换一下策略，不直接介绍源码，打算先整体介绍一下思路，然后再根据源码解释具体的实现。  如图所示，一个dict字典中由两个hashtable组成，分别为ht[0]和ht[1]，用到的基本上都是ht[0]。 那么ht[1]什么时候用到呢？因为hash算出来的索引值是有可能重复的，也就是说不同的dictEntry有可能位于同一个hashtable的槽内，如果拥有的dictEntry的数量和slot的数">
+<meta name="keywords" content="redis,源码">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Redis源码剖析-dict字典">
 <meta property="og:url" content="https://harleylau.github.io/2017/07/31/Redis源码剖析-dict字典/index.html">
 <meta property="og:site_name" content="Harley_Lau">
 <meta property="og:description" content="改换一下策略，不直接介绍源码，打算先整体介绍一下思路，然后再根据源码解释具体的实现。  如图所示，一个dict字典中由两个hashtable组成，分别为ht[0]和ht[1]，用到的基本上都是ht[0]。 那么ht[1]什么时候用到呢？因为hash算出来的索引值是有可能重复的，也就是说不同的dictEntry有可能位于同一个hashtable的槽内，如果拥有的dictEntry的数量和slot的数">
 <meta property="og:image" content="https://harleylau.github.io/2017/07/31/Redis源码剖析-dict字典/dict.png">
-<meta property="og:updated_time" content="2017-08-02T08:02:41.000Z">
+<meta property="og:updated_time" content="2017-08-02T08:09:25.000Z">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="Redis源码剖析-dict字典">
 <meta name="twitter:description" content="改换一下策略，不直接介绍源码，打算先整体介绍一下思路，然后再根据源码解释具体的实现。  如图所示，一个dict字典中由两个hashtable组成，分别为ht[0]和ht[1]，用到的基本上都是ht[0]。 那么ht[1]什么时候用到呢？因为hash算出来的索引值是有可能重复的，也就是说不同的dictEntry有可能位于同一个hashtable的槽内，如果拥有的dictEntry的数量和slot的数">
@@ -122,14 +123,25 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/31/Redis源码剖析-dict字典/" data-id="cj5uq6fgl0001u4674cc81zuq" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/31/Redis源码剖析-dict字典/" data-id="cj6omx38r00041767klh1fig1" class="article-share-link">Share</a>
       
       
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
+
     </footer>
   </div>
   
     
 <nav id="article-nav">
+  
+    <a href="/2017/08/02/Redis源码剖析-dict遍历算法/" id="article-nav-newer" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Newer</strong>
+      <div class="article-nav-title">
+        
+          Redis源码剖析-dict遍历算法
+        
+      </div>
+    </a>
   
   
     <a href="/2017/07/31/Redis源码剖析-链表list/" id="article-nav-older" class="article-nav-link-wrap">
@@ -172,7 +184,7 @@
   <div class="widget-wrap">
     <h3 class="widget-title">归档</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">七月 2017</a></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">八月 2017</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">七月 2017</a></li></ul>
     </div>
   </div>
 
@@ -183,6 +195,10 @@
     <h3 class="widget-title">最新文章</h3>
     <div class="widget">
       <ul>
+        
+          <li>
+            <a href="/2017/08/02/Redis源码剖析-dict遍历算法/">Redis源码剖析-dict遍历算法</a>
+          </li>
         
           <li>
             <a href="/2017/07/31/Redis源码剖析-dict字典/">Redis源码剖析-dict字典</a>
@@ -198,10 +214,6 @@
         
           <li>
             <a href="/2017/07/25/Tornado-线程池应用/">Tornado 线程池应用</a>
-          </li>
-        
-          <li>
-            <a href="/2017/07/25/Json-Web-Token/">Json Web Token</a>
           </li>
         
       </ul>
