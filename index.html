@@ -61,6 +61,74 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-Redis源码剖析-跳跃表" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2017/08/24/Redis源码剖析-跳跃表/" class="article-date">
+  <time datetime="2017-08-24T02:46:04.000Z" itemprop="datePublished">2017-08-24</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2017/08/24/Redis源码剖析-跳跃表/">Redis源码剖析--跳跃表</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>跳跃表（skiplist）是一种有序数据结构， 它通过在每个节点中维持多个指向其他节点的指针， 从而达到快速访问节点的目的。</p>
+<p>跳跃表支持平均 O(\log N) 最坏 O(N) 复杂度的节点查找， 还可以通过顺序性操作来批量处理节点。</p>
+<p>在大部分情况下， 跳跃表的效率可以和平衡树相媲美， 并且因为跳跃表的实现比平衡树要来得更为简单， 所以有不少程序都使用跳跃表来代替平衡树。</p>
+<p>Redis 使用跳跃表作为有序集合键的底层实现之一： 如果一个有序集合包含的元素数量比较多， 又或者有序集合中元素的成员（member）是比较长的字符串时， Redis 就会使用跳跃表来作为有序集合键的底层实现。</p>
+<p>和链表、字典等数据结构被广泛地应用在 Redis 内部不同， Redis 只在两个地方用到了跳跃表， 一个是实现有序集合键， 另一个是在集群节点中用作内部数据结构， 除此之外， 跳跃表在 Redis 里面没有其他用途。</p>
+<p>先看一下维基百科对跳跃表的图示：<br><img src="/2017/08/24/Redis源码剖析-跳跃表/Skip_list.svg" alt="logo"></p>
+<p>从图中可以看到， 跳跃表主要由以下部分构成：</p>
+<ul>
+<li>表头（head）：负责维护跳跃表的节点指针。</li>
+<li>跳跃表节点：保存着元素值，以及多个层。</li>
+<li>层：保存着指向其他元素的指针。高层的指针越过的元素数量大于等于低层的指针，为了提高查找的效率，程序总是从高层先开始访问，然后随着元素值范围的缩小，慢慢降低层次。</li>
+<li>表尾：全部由 NULL 组成，表示跳跃表的末尾。</li>
+</ul>
+<h2 id="跳跃表结构定义"><a href="#跳跃表结构定义" class="headerlink" title="跳跃表结构定义"></a>跳跃表结构定义</h2><p>跳跃表的结构体定义在server.h文件中。其中包括跳跃表节点zskiplistNode和跳跃表zskiplist两个结构体。</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div></pre></td><td class="code"><pre><div class="line">/* ZSETs use a specialized version of Skiplists */</div><div class="line">typedef struct zskiplistNode &#123;</div><div class="line">    sds ele;   // 具体成员对象</div><div class="line">    double score;   // 成员分值</div><div class="line">    struct zskiplistNode *backward;  // 向后索引指针</div><div class="line">    struct zskiplistLevel &#123;    // 跳跃表层</div><div class="line">        struct zskiplistNode *forward;  // 前向索引指针</div><div class="line">        unsigned int span;    // 这一层的跨度</div><div class="line">    &#125; level[];</div><div class="line">&#125; zskiplistNode;</div><div class="line"></div><div class="line">typedef struct zskiplist &#123;</div><div class="line">    struct zskiplistNode *header, *tail;   // 头尾结点</div><div class="line">    unsigned long length;    // 总的结点数</div><div class="line">    int level;    // 总的层数</div><div class="line">&#125; zskiplist;</div></pre></td></tr></table></figure>
+<p>每次创建一个新跳跃表节点的时候， 程序都根据幂次定律 （power law，越大的数出现的概率越小） 随机生成一个介于 1 和 32 之间的值作为 level 数组的大小， 这个大小就是层的“高度”。</p>
+<p>总的层数保存在zskiplist的level参数中， 另外每个节点保存了各自层中的指针以及这一层的跨度。</p>
+<h2 id="跳跃表操作"><a href="#跳跃表操作" class="headerlink" title="跳跃表操作"></a>跳跃表操作</h2><h3 id="创建跳跃表"><a href="#创建跳跃表" class="headerlink" title="创建跳跃表"></a>创建跳跃表</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div><div class="line">36</div></pre></td><td class="code"><pre><div class="line">/* Create a skiplist node with the specified number of levels.</div><div class="line"> * The SDS string &apos;ele&apos; is referenced by the node after the call. */</div><div class="line"> // 创建跳跃表结点</div><div class="line">zskiplistNode *zslCreateNode(int level, double score, sds ele) &#123;</div><div class="line">    // 开辟内存，根据传入的层数设置大小</div><div class="line">    zskiplistNode *zn =</div><div class="line">        zmalloc(sizeof(*zn)+level*sizeof(struct zskiplistLevel));</div><div class="line">    // 赋值跳跃表结点分值</div><div class="line">    zn-&gt;score = score;</div><div class="line">    // 赋值跳跃表结点对象</div><div class="line">    zn-&gt;ele = ele;</div><div class="line">    return zn;</div><div class="line">&#125;</div><div class="line"></div><div class="line">/* 创建跳跃表 */</div><div class="line">zskiplist *zslCreate(void) &#123;</div><div class="line">    int j;</div><div class="line">    zskiplist *zsl;</div><div class="line">    // 申请内存</div><div class="line">    zsl = zmalloc(sizeof(*zsl));</div><div class="line">    // 设置层数为1</div><div class="line">    zsl-&gt;level = 1;</div><div class="line">    // 总的结点数为0</div><div class="line">    zsl-&gt;length = 0;</div><div class="line">    // ZSKIPLIST_MAXLEVEL=32, 头结点，设置最大层数，分值为0， 具体对象为NULL</div><div class="line">    zsl-&gt;header = zslCreateNode(ZSKIPLIST_MAXLEVEL,0,NULL);</div><div class="line">    // 循环设置头结点的每一层的前向指针为NULL，跨度为0</div><div class="line">    for (j = 0; j &lt; ZSKIPLIST_MAXLEVEL; j++) &#123;</div><div class="line">        zsl-&gt;header-&gt;level[j].forward = NULL;</div><div class="line">        zsl-&gt;header-&gt;level[j].span = 0;</div><div class="line">    &#125;</div><div class="line">    // 头结点的后向指针为NULL</div><div class="line">    zsl-&gt;header-&gt;backward = NULL;</div><div class="line">    zsl-&gt;tail = NULL;</div><div class="line">    return zsl;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>创建跳跃表的时候设置层数为1， 只有一个头结点，头结点保存了最大的层数，同时所有的前向指针都为NULL。</p>
+<h3 id="释放整个跳跃表"><a href="#释放整个跳跃表" class="headerlink" title="释放整个跳跃表"></a>释放整个跳跃表</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div></pre></td><td class="code"><pre><div class="line">/* Free the specified skiplist node. The referenced SDS string representation</div><div class="line"> * of the element is freed too, unless node-&gt;ele is set to NULL before calling</div><div class="line"> * this function. */</div><div class="line">void zslFreeNode(zskiplistNode *node) &#123;</div><div class="line">    sdsfree(node-&gt;ele);</div><div class="line">    zfree(node);</div><div class="line">&#125;</div><div class="line"></div><div class="line">/* 释放整个跳跃表. */</div><div class="line">void zslFree(zskiplist *zsl) &#123;</div><div class="line">    // 从最底层的level[0]依次遍历，释放</div><div class="line">    zskiplistNode *node = zsl-&gt;header-&gt;level[0].forward, *next;</div><div class="line"></div><div class="line">    zfree(zsl-&gt;header);</div><div class="line">    // 如果存在后续结点</div><div class="line">    while(node) &#123;</div><div class="line">        next = node-&gt;level[0].forward;</div><div class="line">        // 释放结点</div><div class="line">        zslFreeNode(node);</div><div class="line">        node = next;</div><div class="line">    &#125;</div><div class="line">    zfree(zsl);</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<h3 id="跳跃表插入元素"><a href="#跳跃表插入元素" class="headerlink" title="跳跃表插入元素"></a>跳跃表插入元素</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div><div class="line">36</div><div class="line">37</div><div class="line">38</div><div class="line">39</div><div class="line">40</div><div class="line">41</div><div class="line">42</div><div class="line">43</div><div class="line">44</div><div class="line">45</div><div class="line">46</div><div class="line">47</div><div class="line">48</div><div class="line">49</div><div class="line">50</div><div class="line">51</div><div class="line">52</div><div class="line">53</div><div class="line">54</div><div class="line">55</div><div class="line">56</div><div class="line">57</div><div class="line">58</div><div class="line">59</div><div class="line">60</div><div class="line">61</div><div class="line">62</div><div class="line">63</div><div class="line">64</div><div class="line">65</div><div class="line">66</div><div class="line">67</div><div class="line">68</div><div class="line">69</div><div class="line">70</div><div class="line">71</div><div class="line">72</div><div class="line">73</div><div class="line">74</div></pre></td><td class="code"><pre><div class="line">/* Insert a new node in the skiplist. Assumes the element does not already</div><div class="line"> * exist (up to the caller to enforce that). The skiplist takes ownership</div><div class="line"> * of the passed SDS string &apos;ele&apos;. */</div><div class="line"> // 跳跃表插入元素</div><div class="line">zskiplistNode *zslInsert(zskiplist *zsl, double score, sds ele) &#123;</div><div class="line">    zskiplistNode *update[ZSKIPLIST_MAXLEVEL], *x;</div><div class="line">    unsigned int rank[ZSKIPLIST_MAXLEVEL];</div><div class="line">    int i, level;</div><div class="line"></div><div class="line">    serverAssert(!isnan(score));   　// 判断是否为数字</div><div class="line">    x = zsl-&gt;header;</div><div class="line">    // 从最高的level， 也即跨度最大的level开始查找结点</div><div class="line">    for (i = zsl-&gt;level-1; i &gt;= 0; i--) &#123;</div><div class="line">        /* store rank that is crossed to reach the insert position */</div><div class="line">        // 当前是否是最高层， 如果是最高层，rank[i]=0，否则，复制上一层的数值</div><div class="line">        rank[i] = i == (zsl-&gt;level-1) ? 0 : rank[i+1];</div><div class="line">        // 如果当前结点的score值小于传入的score 或者 当前score相等，但是结点的对象不相等</div><div class="line">        while (x-&gt;level[i].forward &amp;&amp;</div><div class="line">                (x-&gt;level[i].forward-&gt;score &lt; score ||</div><div class="line">                    (x-&gt;level[i].forward-&gt;score == score &amp;&amp;</div><div class="line">                    sdscmp(x-&gt;level[i].forward-&gt;ele,ele) &lt; 0)))</div><div class="line">        &#123;</div><div class="line">            // 将当前一层的跨度加到rank[i]</div><div class="line">            rank[i] += x-&gt;level[i].span;</div><div class="line">            // 在当前层中向前查找</div><div class="line">            x = x-&gt;level[i].forward;</div><div class="line">        &#125;</div><div class="line">        // 当前层位于插入位置前的结点x放入update数组</div><div class="line">        update[i] = x;</div><div class="line">    &#125;</div><div class="line">    /* we assume the element is not already inside, since we allow duplicated</div><div class="line">     * scores, reinserting the same element should never happen since the</div><div class="line">     * caller of zslInsert() should test in the hash table if the element is</div><div class="line">     * already inside or not. */</div><div class="line">    // 随机生成小于32的层数</div><div class="line">    level = zslRandomLevel();</div><div class="line">    // 如果生成的层数大于当前的层数</div><div class="line">    if (level &gt; zsl-&gt;level) &#123;</div><div class="line">        for (i = zsl-&gt;level; i &lt; level; i++) &#123;</div><div class="line">            // 设定rank数组中大于原level层以上的值为0</div><div class="line">            // 同时设定update数组大于原level层以上的数据</div><div class="line">            rank[i] = 0;</div><div class="line">            update[i] = zsl-&gt;header;</div><div class="line">            update[i]-&gt;level[i].span = zsl-&gt;length;</div><div class="line">        &#125;</div><div class="line">        zsl-&gt;level = level;</div><div class="line">    &#125;</div><div class="line">    // 创建层数为level的新结点</div><div class="line">    x = zslCreateNode(level,score,ele);</div><div class="line">    for (i = 0; i &lt; level; i++) &#123;</div><div class="line">        // 将每一层的前置结点的后续结点指向新结点， 同时设置新结点的后续结点</div><div class="line">        x-&gt;level[i].forward = update[i]-&gt;level[i].forward;</div><div class="line">        update[i]-&gt;level[i].forward = x;</div><div class="line"></div><div class="line">        /* update span covered by update[i] as x is inserted here */</div><div class="line">        // 更新每一层的前置结点和新结点的跨度</div><div class="line">        x-&gt;level[i].span = update[i]-&gt;level[i].span - (rank[0] - rank[i]);</div><div class="line">        update[i]-&gt;level[i].span = (rank[0] - rank[i]) + 1;</div><div class="line">    &#125;</div><div class="line"></div><div class="line">    /* increment span for untouched levels */</div><div class="line">    for (i = level; i &lt; zsl-&gt;level; i++) &#123;</div><div class="line">        update[i]-&gt;level[i].span++;</div><div class="line">    &#125;</div><div class="line"></div><div class="line">    // 根据最低层的前序结点是否是header结点来设置当前新结点的向后指针</div><div class="line">    x-&gt;backward = (update[0] == zsl-&gt;header) ? NULL : update[0];</div><div class="line">    if (x-&gt;level[0].forward)</div><div class="line">        x-&gt;level[0].forward-&gt;backward = x;</div><div class="line">    else</div><div class="line">        zsl-&gt;tail = x;</div><div class="line">    zsl-&gt;length++;</div><div class="line">    return x;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>首先看图示，如果想要插入score=5的结点（redis中允许score值重复），那么首选需要找到score=5的结点，查找的顺序为：</p>
+<p><img src="/2017/08/24/Redis源码剖析-跳跃表/WX20170824-181328.png" alt="logo"></p>
+<p>从最大的层向后查找，如果当前层后边没有值了，并且当前结点的值小于要找的值，就查找下一层结点；如果下一个结点的值大于要找的值，也会到下一层结点继续查找。</p>
+<p>找到对应的位置执行插入操作后，需要为新结点设置层数，那么设置多少层合适呢，这边直接采用了一个随机数。随机数生成了多少层，当前新结点的层数就设置多少层。</p>
+<p>如果新层数小于原来的层数，只需要重新设置前序后置结点的指针和跨度就行；如果新层数大于原来的层数，就需要额外设置新的更高的层。</p>
+<p>那么插入结点之后，如何修改前序和后置结点的指针和跨度呢。这边用了两个数组来记录，分别是update和rank。update用来记录每一层中插入位置的前序结点，到时候根据这个前序结点设置每一层的指针调整。 rank用来记录每一层到新结点的跨度，插入新结点之后，根据rank数组中记录跨度更新前置结点的跨度值。</p>
+<h3 id="删除跳跃表结点"><a href="#删除跳跃表结点" class="headerlink" title="删除跳跃表结点"></a>删除跳跃表结点</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div></pre></td><td class="code"><pre><div class="line"> /* 删除结点，如果结点存在并删除，返回1， 否则返回0</div><div class="line">    参数中node如果是空的，则结点确实被删除； 如果非空，只是把结点从链表上摘下来，返回指针给node*/</div><div class="line">int zslDelete(zskiplist *zsl, double score, sds ele, zskiplistNode **node) &#123;</div><div class="line">    zskiplistNode *update[ZSKIPLIST_MAXLEVEL], *x;</div><div class="line">    int i;</div><div class="line"></div><div class="line">    x = zsl-&gt;header;</div><div class="line">    // 查找对应结点</div><div class="line">    for (i = zsl-&gt;level-1; i &gt;= 0; i--) &#123;</div><div class="line">        while (x-&gt;level[i].forward &amp;&amp;</div><div class="line">                (x-&gt;level[i].forward-&gt;score &lt; score ||</div><div class="line">                    (x-&gt;level[i].forward-&gt;score == score &amp;&amp;</div><div class="line">                     sdscmp(x-&gt;level[i].forward-&gt;ele,ele) &lt; 0)))</div><div class="line">        &#123;</div><div class="line">            x = x-&gt;level[i].forward;</div><div class="line">        &#125;</div><div class="line">        update[i] = x;</div><div class="line">    &#125;</div><div class="line">    /* We may have multiple elements with the same score, what we need</div><div class="line">     * is to find the element with both the right score and object. */</div><div class="line">    // 由于允许存在相同的score，需要在score和ele都满足的条件下才能删除</div><div class="line">    x = x-&gt;level[0].forward;</div><div class="line">    if (x &amp;&amp; score == x-&gt;score &amp;&amp; sdscmp(x-&gt;ele,ele) == 0) &#123;</div><div class="line">        zslDeleteNode(zsl, x, update);</div><div class="line">        if (!node)</div><div class="line">            zslFreeNode(x);</div><div class="line">        else</div><div class="line">            *node = x;</div><div class="line">        return 1;</div><div class="line">    &#125;</div><div class="line">    return 0; /* not found */</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>具体的结点删除操作：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div></pre></td><td class="code"><pre><div class="line">/* Internal function used by zslDelete, zslDeleteByScore and zslDeleteByRank */</div><div class="line">// update数组保存了所有层上要删除结点的前置结点</div><div class="line">void zslDeleteNode(zskiplist *zsl, zskiplistNode *x, zskiplistNode **update) &#123;</div><div class="line">    int i;</div><div class="line">    for (i = 0; i &lt; zsl-&gt;level; i++) &#123;</div><div class="line">        if (update[i]-&gt;level[i].forward == x) &#123;</div><div class="line">            // 如果当前层有指针指向要删除的结点，前置结点的跨度需要加上当前结点的跨度，同时更新指针</div><div class="line">            update[i]-&gt;level[i].span += x-&gt;level[i].span - 1;</div><div class="line">            update[i]-&gt;level[i].forward = x-&gt;level[i].forward;</div><div class="line">        &#125; else &#123;</div><div class="line">            // 否则，只需要将前置结点的跨度减1即可，因为少了一个结点啊</div><div class="line">            update[i]-&gt;level[i].span -= 1;</div><div class="line">        &#125;</div><div class="line">    &#125;</div><div class="line">    // 修改backward指针，需要考虑x是否为尾节点</div><div class="line">    if (x-&gt;level[0].forward) &#123;</div><div class="line">        x-&gt;level[0].forward-&gt;backward = x-&gt;backward;</div><div class="line">    &#125; else &#123;</div><div class="line">        zsl-&gt;tail = x-&gt;backward;</div><div class="line">    &#125;</div><div class="line">    while(zsl-&gt;level &gt; 1 &amp;&amp; zsl-&gt;header-&gt;level[zsl-&gt;level-1].forward == NULL)</div><div class="line">        zsl-&gt;level--;</div><div class="line">    zsl-&gt;length--;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="https://harleylau.github.io/2017/08/24/Redis源码剖析-跳跃表/" data-id="cj6qcbxdx00054m678yd6kdnd" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-Redis源码剖析-dict遍历算法" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2017/08/02/Redis源码剖析-dict遍历算法/" class="article-date">
@@ -116,7 +184,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/08/02/Redis源码剖析-dict遍历算法/" data-id="cj6omx38c00001767wflyui8r" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/08/02/Redis源码剖析-dict遍历算法/" data-id="cj6qcbxds00034m67vzeml5sh" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
@@ -185,7 +253,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/31/Redis源码剖析-dict字典/" data-id="cj6omx38r00041767klh1fig1" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/31/Redis源码剖析-dict字典/" data-id="cj6qcbxdo00014m67zc4uuneb" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
@@ -244,7 +312,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/31/Redis源码剖析-链表list/" data-id="cj6omx38v00051767rkvno4sv" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/31/Redis源码剖析-链表list/" data-id="cj6qcbxe000084m67izph67c9" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
@@ -338,7 +406,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/28/Redis源码剖析-简单动态字符串sds/" data-id="cj6omx38q000317673h4w9i18" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/28/Redis源码剖析-简单动态字符串sds/" data-id="cj6qcbxdu00044m67vyye9wqg" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
@@ -387,7 +455,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/25/Tornado-线程池应用/" data-id="cj6omx39300081767uc1aw5d5" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/25/Tornado-线程池应用/" data-id="cj6qcbxe200094m67eg5flj5w" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Python/">Python</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Tornado/">Tornado</a></li></ul>
@@ -457,7 +525,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/25/Json-Web-Token/" data-id="cj6omx38k000117672jq3kkrf" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/25/Json-Web-Token/" data-id="cj6qcbxdj00004m67e1yxb9yg" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JWT/">JWT</a></li></ul>
@@ -504,7 +572,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/12/hello-world/" data-id="cj6omx38z00071767z0l75uxc" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/12/hello-world/" data-id="cj6qcbxf3000w4m67s1i7fnsq" class="article-share-link">Share</a>
       
       
     </footer>
@@ -558,6 +626,10 @@
       <ul>
         
           <li>
+            <a href="/2017/08/24/Redis源码剖析-跳跃表/">Redis源码剖析--跳跃表</a>
+          </li>
+        
+          <li>
             <a href="/2017/08/02/Redis源码剖析-dict遍历算法/">Redis源码剖析-dict遍历算法</a>
           </li>
         
@@ -571,10 +643,6 @@
         
           <li>
             <a href="/2017/07/28/Redis源码剖析-简单动态字符串sds/">Redis源码剖析--简单动态字符串sds</a>
-          </li>
-        
-          <li>
-            <a href="/2017/07/25/Tornado-线程池应用/">Tornado 线程池应用</a>
           </li>
         
       </ul>
