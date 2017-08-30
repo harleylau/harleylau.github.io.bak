@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  <title>Redis源码剖析--整数集合 | Harley_Lau</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="description" content="整数集合（intset）是集合键的底层实现之一： 当一个集合只包含整数值元素， 并且这个集合的元素数量不多时， Redis 就会使用整数集合作为集合键的底层实现。 1234127.0.0.1:6379&amp;gt; sadd numbers 1 2 3 4 5(integer) 5127.0.0.1:6379&amp;gt; object encoding numbers&amp;quot;intset&amp;quot; 这">
+<meta name="keywords" content="redis,源码">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Redis源码剖析--整数集合">
+<meta property="og:url" content="https://harleylau.github.io/2017/08/29/Redis源码剖析-整数集合/index.html">
+<meta property="og:site_name" content="Harley_Lau">
+<meta property="og:description" content="整数集合（intset）是集合键的底层实现之一： 当一个集合只包含整数值元素， 并且这个集合的元素数量不多时， Redis 就会使用整数集合作为集合键的底层实现。 1234127.0.0.1:6379&amp;gt; sadd numbers 1 2 3 4 5(integer) 5127.0.0.1:6379&amp;gt; object encoding numbers&amp;quot;intset&amp;quot; 这">
+<meta property="og:updated_time" content="2017-08-30T03:43:15.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Redis源码剖析--整数集合">
+<meta name="twitter:description" content="整数集合（intset）是集合键的底层实现之一： 当一个集合只包含整数值元素， 并且这个集合的元素数量不多时， Redis 就会使用整数集合作为集合键的底层实现。 1234127.0.0.1:6379&amp;gt; sadd numbers 1 2 3 4 5(integer) 5127.0.0.1:6379&amp;gt; object encoding numbers&amp;quot;intset&amp;quot; 这">
+  
+    <link rel="alternate" href="/atom.xml" title="Harley_Lau" type="application/atom+xml">
+  
+  
+    <link rel="icon" href="/favicon.png">
+  
+  
+    <link href="//fonts.googleapis.com/css?family=Source+Code+Pro" rel="stylesheet" type="text/css">
+  
+  <link rel="stylesheet" href="/css/style.css">
+  
+
+</head>
+
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">Harley_Lau</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+          <a id="nav-rss-link" class="nav-icon" href="/atom.xml" title="RSS Feed"></a>
+        
+        <a id="nav-search-btn" class="nav-icon" title="搜索"></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="https://harleylau.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+      <div class="outer">
+        <section id="main"><article id="post-Redis源码剖析-整数集合" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2017/08/29/Redis源码剖析-整数集合/" class="article-date">
+  <time datetime="2017-08-29T09:44:28.000Z" itemprop="datePublished">2017-08-29</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="article-title" itemprop="name">
+      Redis源码剖析--整数集合
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>整数集合（intset）是集合键的底层实现之一： 当一个集合只包含整数值元素， 并且这个集合的元素数量不多时， Redis 就会使用整数集合作为集合键的底层实现。</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div></pre></td><td class="code"><pre><div class="line">127.0.0.1:6379&gt; sadd numbers 1 2 3 4 5</div><div class="line">(integer) 5</div><div class="line">127.0.0.1:6379&gt; object encoding numbers</div><div class="line">&quot;intset&quot;</div></pre></td></tr></table></figure>
+<p>这么做的好处是当集合中只有少量的整数元素的时候，采用之前介绍的其他数据结构，比如sds，都会占用比较大的内存，但如果仅保存为整数集合的话，则会更加经济。</p>
+<h2 id="整数数组数据结构"><a href="#整数数组数据结构" class="headerlink" title="整数数组数据结构"></a>整数数组数据结构</h2><p>整数数组的定义位于intset.h中，具体如下：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div></pre></td><td class="code"><pre><div class="line">typedef struct intset &#123;</div><div class="line">    uint32_t encoding;  // 编码方式</div><div class="line">    uint32_t length;   // 保存的元素个数</div><div class="line">    int8_t contents[];  // 保存元素的数组</div><div class="line">&#125; intset;</div></pre></td></tr></table></figure>
+<p>虽然 intset 结构将 contents 属性声明为 int8_t 类型的数组， 但实际上 contents 数组并不保存任何 int8_t 类型的值 —— contents 数组的真正类型取决于 encoding 属性的值：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div></pre></td><td class="code"><pre><div class="line">#define INTSET_ENC_INT16 (sizeof(int16_t))</div><div class="line">#define INTSET_ENC_INT32 (sizeof(int32_t))</div><div class="line">#define INTSET_ENC_INT64 (sizeof(int64_t))</div><div class="line"></div><div class="line">/* Return the required encoding for the provided value. */</div><div class="line">static uint8_t _intsetValueEncoding(int64_t v) &#123;</div><div class="line">    if (v &lt; INT32_MIN || v &gt; INT32_MAX)</div><div class="line">        return INTSET_ENC_INT64;</div><div class="line">    else if (v &lt; INT16_MIN || v &gt; INT16_MAX)</div><div class="line">        return INTSET_ENC_INT32;</div><div class="line">    else</div><div class="line">        return INTSET_ENC_INT16;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>可以看到一共会有三种类型，分别对应int_16, int_32, int_64。</p>
+<p>整数数组中所有的元素在数组中按值的大小从小到大有序地排列， 并且数组中不包含任何重复项。</p>
+<h2 id="整数集合操作"><a href="#整数集合操作" class="headerlink" title="整数集合操作"></a>整数集合操作</h2><h3 id="创建整数集合"><a href="#创建整数集合" class="headerlink" title="创建整数集合"></a>创建整数集合</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div></pre></td><td class="code"><pre><div class="line">// 初始化空的整数集合</div><div class="line">intset *intsetNew(void) &#123;</div><div class="line">    intset *is = zmalloc(sizeof(intset));</div><div class="line">    is-&gt;encoding = intrev32ifbe(INTSET_ENC_INT16); // 默认创建int_16的编码格式</div><div class="line">    is-&gt;length = 0;</div><div class="line">    return is;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<h3 id="插入一个元素"><a href="#插入一个元素" class="headerlink" title="插入一个元素"></a>插入一个元素</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div></pre></td><td class="code"><pre><div class="line">/* Insert an integer in the intset */</div><div class="line">intset *intsetAdd(intset *is, int64_t value, uint8_t *success) &#123;</div><div class="line">    uint8_t valenc = _intsetValueEncoding(value);</div><div class="line">    uint32_t pos;</div><div class="line">    if (success) *success = 1;</div><div class="line"></div><div class="line">    // 如果超出了当前编码格式所能表示的范围，则升级整数集合并添加元素</div><div class="line">    if (valenc &gt; intrev32ifbe(is-&gt;encoding)) &#123;</div><div class="line">        /* This always succeeds, so we don&apos;t need to curry *success. */</div><div class="line">        return intsetUpgradeAndAdd(is,value);</div><div class="line">    &#125; else &#123;</div><div class="line">        // 如果元素已经存在于集合，success返回0</div><div class="line">        // 如果不存在的话， 这个函数会返回元素应该插入的位置pos</div><div class="line">        if (intsetSearch(is,value,&amp;pos)) &#123;</div><div class="line">            if (success) *success = 0;</div><div class="line">            return is;</div><div class="line">        &#125;</div><div class="line">        // 否则，需要重新调整集合的大小</div><div class="line">        is = intsetResize(is,intrev32ifbe(is-&gt;length)+1);</div><div class="line">        // 将pos之后的数据全都向后挪动一个位子</div><div class="line">        if (pos &lt; intrev32ifbe(is-&gt;length)) intsetMoveTail(is,pos,pos+1);</div><div class="line">    &#125;</div><div class="line"></div><div class="line">    _intsetSet(is,pos,value); // 添加数据到第pos位</div><div class="line">    is-&gt;length = intrev32ifbe(intrev32ifbe(is-&gt;length)+1); // 调整元素个数</div><div class="line">    return is;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>在插入元素的时候，需要根据新元素的大小来重新确定所采用的编码。如果新元素超出了原有编码的表示范围，就需要调整编码，同时调整集合中所有其他元素的编码格式。调整编码是一个不可逆的过程，就是说只能从小的编码调整到大的编码，只能升级不能降级。</p>
+<h3 id="升级过程"><a href="#升级过程" class="headerlink" title="升级过程"></a>升级过程</h3><p>升级整数集合并添加新元素调用的是intsetUpgradeAndAdd函数，共分为三步进行：</p>
+<ul>
+<li>根据新元素的类型， 扩展整数集合底层数组的空间大小， 并为新元素分配空间。</li>
+<li>将底层数组现有的所有元素都转换成与新元素相同的类型， 并将类型转换后的元素放置到正确的位上， 而且在放置元素的过程中， 需要继续维持底层数组的有序性质不变。</li>
+<li>将新元素添加到底层数组里面。</li>
+</ul>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div></pre></td><td class="code"><pre><div class="line">/* Upgrades the intset to a larger encoding and inserts the given integer. */</div><div class="line">static intset *intsetUpgradeAndAdd(intset *is, int64_t value) &#123;</div><div class="line">    // 当前的编码</div><div class="line">    uint8_t curenc = intrev32ifbe(is-&gt;encoding);</div><div class="line">    // 根据新元素的值获得新的编码</div><div class="line">    uint8_t newenc = _intsetValueEncoding(value);</div><div class="line">    int length = intrev32ifbe(is-&gt;length);</div><div class="line">    // 由于整数集合是一个有序集合，所以新的这个超出范围的元素，要不插入头部，要不插入尾部</div><div class="line">    // 当value大于0的时候，就是插入到尾部，否则插入到头部，用参数prepend来标记</div><div class="line">    int prepend = value &lt; 0 ? 1 : 0;</div><div class="line"></div><div class="line">    /* First set new encoding and resize */</div><div class="line">    // 重新设置整数集合的编码</div><div class="line">    is-&gt;encoding = intrev32ifbe(newenc);</div><div class="line">    // 根据新编码调整整数集合的大小</div><div class="line">    is = intsetResize(is,intrev32ifbe(is-&gt;length)+1);</div><div class="line"></div><div class="line"></div><div class="line">    // 从尾部向头部进行升级，这样在挪动其中的元素的时候，不会覆盖原来的值</div><div class="line">    while(length--)</div><div class="line">        // 如果新元素是插入到尾部，prepend==0， 所以原来最后的元素是挪动到length位置</div><div class="line">        // 如果新元素是插入到头部，prepend==1，所有的元素都要向后挪动一个位置，将头部空出来</div><div class="line">        _intsetSet(is,length+prepend,_intsetGetEncoded(is,length,curenc));</div><div class="line"></div><div class="line">    /* Set the value at the beginning or the end. */</div><div class="line">    if (prepend)</div><div class="line">        // 如果prepend==1， 插入到头部</div><div class="line">        _intsetSet(is,0,value);</div><div class="line">    else</div><div class="line">        // 否则，设置最后一个位置的元素为value</div><div class="line">        _intsetSet(is,intrev32ifbe(is-&gt;length),value);</div><div class="line">    // 元素个数加1</div><div class="line">    is-&gt;length = intrev32ifbe(intrev32ifbe(is-&gt;length)+1);</div><div class="line">    return is;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>而整数集合现在的做法既可以让集合能同时保存三种不同类型的值， 又可以确保升级操作只会在有需要的时候进行， 这可以尽量节省内存。</p>
+<h3 id="查找元素"><a href="#查找元素" class="headerlink" title="查找元素"></a>查找元素</h3><p>查找的时候，需要先判断要查找的元素是否在当前编码的有效范围内，如果不在当前范围内，可以直接返回。</p>
+<p>另外因为整数集合是一个有序集合，可以采用二分查找的办法，</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div><div class="line">36</div><div class="line">37</div><div class="line">38</div><div class="line">39</div><div class="line">40</div><div class="line">41</div><div class="line">42</div><div class="line">43</div><div class="line">44</div><div class="line">45</div><div class="line">46</div><div class="line">47</div><div class="line">48</div><div class="line">49</div><div class="line">50</div><div class="line">51</div><div class="line">52</div><div class="line">53</div><div class="line">54</div><div class="line">55</div></pre></td><td class="code"><pre><div class="line">uint8_t intsetFind(intset *is, int64_t value) &#123;</div><div class="line">    // 获得目标值的编码</div><div class="line">    uint8_t valenc = _intsetValueEncoding(value);</div><div class="line">    // 只有目标值的编码比当前编码小，才继续执行查找过程</div><div class="line">    return valenc &lt;= intrev32ifbe(is-&gt;encoding) &amp;&amp; intsetSearch(is,value,NULL);</div><div class="line">&#125;</div><div class="line"></div><div class="line">// 如果找到这个元素，返回1，同时pos表示这个值在整数集合里边的位置</div><div class="line">// 如果没有找到这个元素，返回0， 同时pos表示这个值可以插入的位置</div><div class="line">static uint8_t intsetSearch(intset *is, int64_t value, uint32_t *pos) &#123;</div><div class="line">    int min = 0, max = intrev32ifbe(is-&gt;length)-1, mid = -1;</div><div class="line">    int64_t cur = -1;</div><div class="line"></div><div class="line">    /* The value can never be found when the set is empty */</div><div class="line">    // 如果集合的长度为0， 直接返回0</div><div class="line">    if (intrev32ifbe(is-&gt;length) == 0) &#123;</div><div class="line">        if (pos) *pos = 0;</div><div class="line">        return 0;</div><div class="line">    &#125; else &#123;</div><div class="line">        /* Check for the case where we know we cannot find the value,</div><div class="line">         * but do know the insert position. */</div><div class="line">        // 如果目标值大于当前最大值，肯定找不到，返回0， 同时待插入的位置pos为length</div><div class="line">        if (value &gt; _intsetGet(is,intrev32ifbe(is-&gt;length)-1)) &#123;</div><div class="line">            if (pos) *pos = intrev32ifbe(is-&gt;length);</div><div class="line">            return 0;</div><div class="line">        &#125; else if (value &lt; _intsetGet(is,0)) &#123;</div><div class="line">            // 如果目标址小于当前最小值，返回0， 同时待插入的位置pos为0</div><div class="line">            if (pos) *pos = 0;</div><div class="line">            return 0;</div><div class="line">        &#125;</div><div class="line">    &#125;</div><div class="line"></div><div class="line">    // 二分查找</div><div class="line">    while(max &gt;= min) &#123;</div><div class="line">        // 得到中间位置</div><div class="line">        mid = ((unsigned int)min + (unsigned int)max) &gt;&gt; 1;</div><div class="line">        // 得到中间位置的值</div><div class="line">        cur = _intsetGet(is,mid);</div><div class="line">        if (value &gt; cur) &#123;</div><div class="line">            min = mid+1;</div><div class="line">        &#125; else if (value &lt; cur) &#123;</div><div class="line">            max = mid-1;</div><div class="line">        &#125; else &#123;</div><div class="line">            break;</div><div class="line">        &#125;</div><div class="line">    &#125;</div><div class="line"></div><div class="line">    if (value == cur) &#123;</div><div class="line">        if (pos) *pos = mid;</div><div class="line">        return 1;</div><div class="line">    &#125; else &#123;</div><div class="line">        if (pos) *pos = min;</div><div class="line">        return 0;</div><div class="line">    &#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="https://harleylau.github.io/2017/08/29/Redis源码剖析-整数集合/" data-id="cj6yh8hwl00042g67b8sk5ksk" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+  
+    <a href="/2017/08/24/Redis源码剖析-跳跃表/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">Redis源码剖析--跳跃表</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+</section>
+        
+          <aside id="sidebar">
+  
+    
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">标签</h3>
+    <div class="widget">
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/JWT/">JWT</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Python/">Python</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Tornado/">Tornado</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/redis/">redis</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/源码/">源码</a></li></ul>
+    </div>
+  </div>
+
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">标签云</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/JWT/" style="font-size: 10px;">JWT</a> <a href="/tags/Python/" style="font-size: 10px;">Python</a> <a href="/tags/Tornado/" style="font-size: 10px;">Tornado</a> <a href="/tags/redis/" style="font-size: 20px;">redis</a> <a href="/tags/源码/" style="font-size: 20px;">源码</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">归档</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">八月 2017</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">七月 2017</a></li></ul>
+    </div>
+  </div>
+
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">最新文章</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2017/08/29/Redis源码剖析-整数集合/">Redis源码剖析--整数集合</a>
+          </li>
+        
+          <li>
+            <a href="/2017/08/24/Redis源码剖析-跳跃表/">Redis源码剖析--跳跃表</a>
+          </li>
+        
+          <li>
+            <a href="/2017/08/02/Redis源码剖析-dict遍历算法/">Redis源码剖析-dict遍历算法</a>
+          </li>
+        
+          <li>
+            <a href="/2017/07/31/Redis源码剖析-dict字典/">Redis源码剖析-dict字典</a>
+          </li>
+        
+          <li>
+            <a href="/2017/07/31/Redis源码剖析-链表list/">Redis源码剖析-链表list</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      &copy; 2017 Harley Liu<br>
+      Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+</nav>
+    
+
+<script src="//ajax.googleapis.com/ajax/libs/jquery/2.0.3/jquery.min.js"></script>
+
+
+  <link rel="stylesheet" href="/fancybox/jquery.fancybox.css">
+  <script src="/fancybox/jquery.fancybox.pack.js"></script>
+
+
+<script src="/js/script.js"></script>
+
+  </div>
+</body>
+</html>
