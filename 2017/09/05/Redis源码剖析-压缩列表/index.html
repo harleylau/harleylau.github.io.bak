@@ -6,14 +6,14 @@
   <title>Redis源码剖析--压缩列表 | Harley_Lau</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <meta name="description" content="压缩列表（ziplist）是列表键和哈希键的底层实现之一。Redis的列表键，哈希键，有序集合的底层实现都用到了ziplist。 当列表键中包含比较少的元素，并且元素都是数字或者比较小的字符串的时候， redis会用压缩列表来作为列表键的底层实现。 当哈希键的键和值都是比较小的整数或者较短的字符的时候，也是用压缩列表来作为底层实现。 因为压缩列表也能够节省内存。 压缩列表结构压缩列表的结构如下：">
-<meta name="keywords" content="redis">
+<meta name="keywords" content="redis,源码">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Redis源码剖析--压缩列表">
 <meta property="og:url" content="https://harleylau.github.io/2017/09/05/Redis源码剖析-压缩列表/index.html">
 <meta property="og:site_name" content="Harley_Lau">
 <meta property="og:description" content="压缩列表（ziplist）是列表键和哈希键的底层实现之一。Redis的列表键，哈希键，有序集合的底层实现都用到了ziplist。 当列表键中包含比较少的元素，并且元素都是数字或者比较小的字符串的时候， redis会用压缩列表来作为列表键的底层实现。 当哈希键的键和值都是比较小的整数或者较短的字符的时候，也是用压缩列表来作为底层实现。 因为压缩列表也能够节省内存。 压缩列表结构压缩列表的结构如下：">
 <meta property="og:image" content="https://harleylau.github.io/2017/09/05/Redis源码剖析-压缩列表/ziplist.png">
-<meta property="og:updated_time" content="2017-09-07T02:40:08.000Z">
+<meta property="og:updated_time" content="2017-09-07T02:42:44.000Z">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="Redis源码剖析--压缩列表">
 <meta name="twitter:description" content="压缩列表（ziplist）是列表键和哈希键的底层实现之一。Redis的列表键，哈希键，有序集合的底层实现都用到了ziplist。 当列表键中包含比较少的元素，并且元素都是数字或者比较小的字符串的时候， redis会用压缩列表来作为列表键的底层实现。 当哈希键的键和值都是比较小的整数或者较短的字符的时候，也是用压缩列表来作为底层实现。 因为压缩列表也能够节省内存。 压缩列表结构压缩列表的结构如下：">
@@ -195,10 +195,10 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/09/05/Redis源码剖析-压缩列表/" data-id="cj79uie7e00048y67o8mjgaer" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/09/05/Redis源码剖析-压缩列表/" data-id="cj79ulewk00059v67618cu2j6" class="article-share-link">Share</a>
       
       
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li></ul>
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
 
     </footer>
   </div>
@@ -238,7 +238,7 @@
   <div class="widget-wrap">
     <h3 class="widget-title">标签云</h3>
     <div class="widget tagcloud">
-      <a href="/tags/JWT/" style="font-size: 10px;">JWT</a> <a href="/tags/Python/" style="font-size: 10px;">Python</a> <a href="/tags/Tornado/" style="font-size: 10px;">Tornado</a> <a href="/tags/redis/" style="font-size: 20px;">redis</a> <a href="/tags/源码/" style="font-size: 15px;">源码</a>
+      <a href="/tags/JWT/" style="font-size: 10px;">JWT</a> <a href="/tags/Python/" style="font-size: 10px;">Python</a> <a href="/tags/Tornado/" style="font-size: 10px;">Tornado</a> <a href="/tags/redis/" style="font-size: 20px;">redis</a> <a href="/tags/源码/" style="font-size: 20px;">源码</a>
     </div>
   </div>
 
