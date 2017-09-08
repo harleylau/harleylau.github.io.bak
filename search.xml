@@ -3,6 +3,143 @@
   
     
     <entry>
+      <title><![CDATA[Redis源码剖析--对象Object]]></title>
+      <url>/2017/09/07/Redis%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90-%E5%AF%B9%E8%B1%A1Object/</url>
+      <content type="html"><![CDATA[<p>之前介绍的都是Redis的基础数据结构，比如简单动态字符串（SDS）、双端链表、字典、压缩列表、整数集合， 等等，不过Redis并没有直接用这些结构来实现键值对的数据库，而是对其进行了封装， 所有的键和值都是用对象Object来表示的。</p>
+<p>Redis构建的对象分为5类， 字符串对象、列表对象、哈希对象、集合对象和有序集合对象这五种类型的对象， 分别对应Redis操作中的string、list、hash、set和zset。</p>
+<h2 id="对象的结构"><a href="#对象的结构" class="headerlink" title="对象的结构"></a>对象的结构</h2><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div></pre></td><td class="code"><pre><div class="line">typedef struct redisObject &#123;</div><div class="line">    unsigned type:4;</div><div class="line">    unsigned encoding:4;</div><div class="line">    unsigned lru:LRU_BITS; // LRU_BITS为24</div><div class="line">    int refcount;</div><div class="line">    void *ptr;</div><div class="line">&#125; robj;</div></pre></td></tr></table></figure>
+<p>type表示类型， encoding表示编码，prt表示指向底层数据实现的指针。</p>
+<p>refcount用来实现基于引用计数技术的内存回收机制：通过引用计数技术实现了对象共享机制， 这一机制可以在适当的条件下， 通过让多个数据库键共享同一个对象来节约内存。</p>
+<h3 id="类型type"><a href="#类型type" class="headerlink" title="类型type"></a>类型type</h3><p>上面说到Redis中有5中对象类型，对应的定义如下</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div></pre></td><td class="code"><pre><div class="line">#define OBJ_STRING 0</div><div class="line">#define OBJ_LIST 1</div><div class="line">#define OBJ_SET 2</div><div class="line">#define OBJ_ZSET 3</div><div class="line">#define OBJ_HASH 4</div></pre></td></tr></table></figure>
+<p>对于 Redis 数据库保存的键值对来说， 键总是一个字符串对象， 而值则可以是字符串对象、列表对象、哈希对象、集合对象或者有序集合对象的其中一种。</p>
+<h3 id="编码和底层实现"><a href="#编码和底层实现" class="headerlink" title="编码和底层实现"></a>编码和底层实现</h3><p>Redis对象的编码方式由encoding参数指定，也就是表示ptr指向的数据以何种数据结构作为底层实现。该字段也占用4个bit位。其取值和对应类型对应如下：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div></pre></td><td class="code"><pre><div class="line">#define OBJ_ENCODING_RAW 0     /* Raw representation */</div><div class="line">#define OBJ_ENCODING_INT 1     /* Encoded as integer */</div><div class="line">#define OBJ_ENCODING_HT 2      /* Encoded as hash table */</div><div class="line">#define OBJ_ENCODING_ZIPMAP 3  /* Encoded as zipmap */</div><div class="line">#define OBJ_ENCODING_LINKEDLIST 4 /* Encoded as regular linked list */</div><div class="line">#define OBJ_ENCODING_ZIPLIST 5 /* Encoded as ziplist */</div><div class="line">#define OBJ_ENCODING_INTSET 6  /* Encoded as intset */</div><div class="line">#define OBJ_ENCODING_SKIPLIST 7  /* Encoded as skiplist */</div><div class="line">#define OBJ_ENCODING_EMBSTR 8  /* Embedded sds string encoding */</div><div class="line">#define OBJ_ENCODING_QUICKLIST 9 /* Encoded as linked list of ziplists */</div></pre></td></tr></table></figure>
+<table>
+<thead>
+<tr>
+<th>编码常量</th>
+<th>编码所对应的底层数据结构</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>REDIS_ENCODING_INT</td>
+<td>long 类型的整数</td>
+</tr>
+<tr>
+<td>REDIS_ENCODING_EMBSTR</td>
+<td>embstr 编码的简单动态字符串</td>
+</tr>
+<tr>
+<td>REDIS_ENCODING_RAW</td>
+<td>简单动态字符串</td>
+</tr>
+<tr>
+<td>REDIS_ENCODING_HT</td>
+<td>字典</td>
+</tr>
+<tr>
+<td>REDIS_ENCODING_LINKEDLIST</td>
+<td>双端链表</td>
+</tr>
+<tr>
+<td>REDIS_ENCODING_ZIPLIST</td>
+<td>压缩列表</td>
+</tr>
+<tr>
+<td>REDIS_ENCODING_INTSET</td>
+<td>整数集合</td>
+</tr>
+<tr>
+<td>REDIS_ENCODING_SKIPLIST</td>
+<td>跳跃表和字典</td>
+</tr>
+</tbody>
+</table>
+<p>Redis中的5中类型的对象，都对应着不止一种的底层实现</p>
+<table>
+<thead>
+<tr>
+<th>类型</th>
+<th>编码</th>
+<th>对象</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>REDIS_STRING</td>
+<td>REDIS_ENCODING_INT</td>
+<td>使用整数值实现的字符串对象。</td>
+</tr>
+<tr>
+<td>REDIS_STRING</td>
+<td>REDIS_ENCODING_EMBSTR</td>
+<td>使用 embstr 编码的简单动态字符串实现的字符串对象。</td>
+</tr>
+<tr>
+<td>REDIS_STRING</td>
+<td>REDIS_ENCODING_RAW</td>
+<td>使用简单动态字符串实现的字符串对象。</td>
+</tr>
+<tr>
+<td>REDIS_LIST</td>
+<td>REDIS_ENCODING_ZIPLIST</td>
+<td>使用压缩列表实现的列表对象。</td>
+</tr>
+<tr>
+<td>REDIS_LIST</td>
+<td>REDIS_ENCODING_LINKEDLIST</td>
+<td>使用双端链表实现的列表对象。</td>
+</tr>
+<tr>
+<td>REDIS_HASH</td>
+<td>REDIS_ENCODING_ZIPLIST</td>
+<td>使用压缩列表实现的哈希对象。</td>
+</tr>
+<tr>
+<td>REDIS_HASH</td>
+<td>REDIS_ENCODING_HT</td>
+<td>使用字典实现的哈希对象。</td>
+</tr>
+<tr>
+<td>REDIS_SET</td>
+<td>REDIS_ENCODING_INTSET</td>
+<td>使用整数集合实现的集合对象。</td>
+</tr>
+<tr>
+<td>REDIS_SET</td>
+<td>REDIS_ENCODING_HT</td>
+<td>使用字典实现的集合对象。</td>
+</tr>
+<tr>
+<td>REDIS_ZSET</td>
+<td>REDIS_ENCODING_ZIPLIST</td>
+<td>使用压缩列表实现的有序集合对象。</td>
+</tr>
+<tr>
+<td>REDIS_ZSET</td>
+<td>REDIS_ENCODING_SKIPLIST</td>
+<td>使用跳跃表和字典实现的有序集合对象。</td>
+</tr>
+</tbody>
+</table>
+<p>通过encoding参数来区分底层的实现，这样既灵活，也能节省内存。比如hash表的实现的时候，当元素比较少的时候，可以用压缩列表来实现；当元素不断增长，压缩列表失去优势的时候，就将其转化成hash table来实现。</p>
+<p>之后几篇分别介绍 Redis 中的五种不同类型的对象， 说明这些对象底层所使用的编码方式。 由于每种对象类型都有不止一种底层结构，所以同时列出对象从一种编码转换成另一种编码所需的条件， 以及同一个命令在多种不同编码上的实现方法。</p>
+]]></content>
+      
+        
+        <tags>
+            
+            <tag> redis </tag>
+            
+            <tag> 源码 </tag>
+            
+        </tags>
+        
+    </entry>
+    
+    <entry>
       <title><![CDATA[tornado--打印block日志]]></title>
       <url>/2017/09/07/tornado-%E6%89%93%E5%8D%B0block%E6%97%A5%E5%BF%97/</url>
       <content type="html"><![CDATA[<p>Tornado在使用过程，碰到过性能瓶颈。 当碰到Tornado中有比较耗时的任务的时候，请求一多就会阻塞整个服务。这个时候就需要查看到底是什么任务阻塞了服务，然后针对性的进行优化。</p>

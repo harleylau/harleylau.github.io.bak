@@ -61,6 +61,165 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-Redis源码剖析-对象Object" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2017/09/07/Redis源码剖析-对象Object/" class="article-date">
+  <time datetime="2017-09-07T10:20:21.000Z" itemprop="datePublished">2017-09-07</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2017/09/07/Redis源码剖析-对象Object/">Redis源码剖析--对象Object</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>之前介绍的都是Redis的基础数据结构，比如简单动态字符串（SDS）、双端链表、字典、压缩列表、整数集合， 等等，不过Redis并没有直接用这些结构来实现键值对的数据库，而是对其进行了封装， 所有的键和值都是用对象Object来表示的。</p>
+<p>Redis构建的对象分为5类， 字符串对象、列表对象、哈希对象、集合对象和有序集合对象这五种类型的对象， 分别对应Redis操作中的string、list、hash、set和zset。</p>
+<h2 id="对象的结构"><a href="#对象的结构" class="headerlink" title="对象的结构"></a>对象的结构</h2><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div></pre></td><td class="code"><pre><div class="line">typedef struct redisObject &#123;</div><div class="line">    unsigned type:4;</div><div class="line">    unsigned encoding:4;</div><div class="line">    unsigned lru:LRU_BITS; // LRU_BITS为24</div><div class="line">    int refcount;</div><div class="line">    void *ptr;</div><div class="line">&#125; robj;</div></pre></td></tr></table></figure>
+<p>type表示类型， encoding表示编码，prt表示指向底层数据实现的指针。</p>
+<p>refcount用来实现基于引用计数技术的内存回收机制：通过引用计数技术实现了对象共享机制， 这一机制可以在适当的条件下， 通过让多个数据库键共享同一个对象来节约内存。</p>
+<h3 id="类型type"><a href="#类型type" class="headerlink" title="类型type"></a>类型type</h3><p>上面说到Redis中有5中对象类型，对应的定义如下</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div></pre></td><td class="code"><pre><div class="line">#define OBJ_STRING 0</div><div class="line">#define OBJ_LIST 1</div><div class="line">#define OBJ_SET 2</div><div class="line">#define OBJ_ZSET 3</div><div class="line">#define OBJ_HASH 4</div></pre></td></tr></table></figure>
+<p>对于 Redis 数据库保存的键值对来说， 键总是一个字符串对象， 而值则可以是字符串对象、列表对象、哈希对象、集合对象或者有序集合对象的其中一种。</p>
+<h3 id="编码和底层实现"><a href="#编码和底层实现" class="headerlink" title="编码和底层实现"></a>编码和底层实现</h3><p>Redis对象的编码方式由encoding参数指定，也就是表示ptr指向的数据以何种数据结构作为底层实现。该字段也占用4个bit位。其取值和对应类型对应如下：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div></pre></td><td class="code"><pre><div class="line">#define OBJ_ENCODING_RAW 0     /* Raw representation */</div><div class="line">#define OBJ_ENCODING_INT 1     /* Encoded as integer */</div><div class="line">#define OBJ_ENCODING_HT 2      /* Encoded as hash table */</div><div class="line">#define OBJ_ENCODING_ZIPMAP 3  /* Encoded as zipmap */</div><div class="line">#define OBJ_ENCODING_LINKEDLIST 4 /* Encoded as regular linked list */</div><div class="line">#define OBJ_ENCODING_ZIPLIST 5 /* Encoded as ziplist */</div><div class="line">#define OBJ_ENCODING_INTSET 6  /* Encoded as intset */</div><div class="line">#define OBJ_ENCODING_SKIPLIST 7  /* Encoded as skiplist */</div><div class="line">#define OBJ_ENCODING_EMBSTR 8  /* Embedded sds string encoding */</div><div class="line">#define OBJ_ENCODING_QUICKLIST 9 /* Encoded as linked list of ziplists */</div></pre></td></tr></table></figure>
+<table>
+<thead>
+<tr>
+<th>编码常量</th>
+<th>编码所对应的底层数据结构</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>REDIS_ENCODING_INT</td>
+<td>long 类型的整数</td>
+</tr>
+<tr>
+<td>REDIS_ENCODING_EMBSTR</td>
+<td>embstr 编码的简单动态字符串</td>
+</tr>
+<tr>
+<td>REDIS_ENCODING_RAW</td>
+<td>简单动态字符串</td>
+</tr>
+<tr>
+<td>REDIS_ENCODING_HT</td>
+<td>字典</td>
+</tr>
+<tr>
+<td>REDIS_ENCODING_LINKEDLIST</td>
+<td>双端链表</td>
+</tr>
+<tr>
+<td>REDIS_ENCODING_ZIPLIST</td>
+<td>压缩列表</td>
+</tr>
+<tr>
+<td>REDIS_ENCODING_INTSET</td>
+<td>整数集合</td>
+</tr>
+<tr>
+<td>REDIS_ENCODING_SKIPLIST</td>
+<td>跳跃表和字典</td>
+</tr>
+</tbody>
+</table>
+<p>Redis中的5中类型的对象，都对应着不止一种的底层实现</p>
+<table>
+<thead>
+<tr>
+<th>类型</th>
+<th>编码</th>
+<th>对象</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>REDIS_STRING</td>
+<td>REDIS_ENCODING_INT</td>
+<td>使用整数值实现的字符串对象。</td>
+</tr>
+<tr>
+<td>REDIS_STRING</td>
+<td>REDIS_ENCODING_EMBSTR</td>
+<td>使用 embstr 编码的简单动态字符串实现的字符串对象。</td>
+</tr>
+<tr>
+<td>REDIS_STRING</td>
+<td>REDIS_ENCODING_RAW</td>
+<td>使用简单动态字符串实现的字符串对象。</td>
+</tr>
+<tr>
+<td>REDIS_LIST</td>
+<td>REDIS_ENCODING_ZIPLIST</td>
+<td>使用压缩列表实现的列表对象。</td>
+</tr>
+<tr>
+<td>REDIS_LIST</td>
+<td>REDIS_ENCODING_LINKEDLIST</td>
+<td>使用双端链表实现的列表对象。</td>
+</tr>
+<tr>
+<td>REDIS_HASH</td>
+<td>REDIS_ENCODING_ZIPLIST</td>
+<td>使用压缩列表实现的哈希对象。</td>
+</tr>
+<tr>
+<td>REDIS_HASH</td>
+<td>REDIS_ENCODING_HT</td>
+<td>使用字典实现的哈希对象。</td>
+</tr>
+<tr>
+<td>REDIS_SET</td>
+<td>REDIS_ENCODING_INTSET</td>
+<td>使用整数集合实现的集合对象。</td>
+</tr>
+<tr>
+<td>REDIS_SET</td>
+<td>REDIS_ENCODING_HT</td>
+<td>使用字典实现的集合对象。</td>
+</tr>
+<tr>
+<td>REDIS_ZSET</td>
+<td>REDIS_ENCODING_ZIPLIST</td>
+<td>使用压缩列表实现的有序集合对象。</td>
+</tr>
+<tr>
+<td>REDIS_ZSET</td>
+<td>REDIS_ENCODING_SKIPLIST</td>
+<td>使用跳跃表和字典实现的有序集合对象。</td>
+</tr>
+</tbody>
+</table>
+<p>通过encoding参数来区分底层的实现，这样既灵活，也能节省内存。比如hash表的实现的时候，当元素比较少的时候，可以用压缩列表来实现；当元素不断增长，压缩列表失去优势的时候，就将其转化成hash table来实现。</p>
+<p>之后几篇分别介绍 Redis 中的五种不同类型的对象， 说明这些对象底层所使用的编码方式。 由于每种对象类型都有不止一种底层结构，所以同时列出对象从一种编码转换成另一种编码所需的条件， 以及同一个命令在多种不同编码上的实现方法。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="https://harleylau.github.io/2017/09/07/Redis源码剖析-对象Object/" data-id="cj7bl7d5o0004st67ov1uvtb2" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-tornado-打印block日志" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2017/09/07/tornado-打印block日志/" class="article-date">
@@ -94,7 +253,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/09/07/tornado-打印block日志/" data-id="cj79wdsa0000bf467f9nu6bun" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/09/07/tornado-打印block日志/" data-id="cj7bl7d63000cst67ed35fjmp" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/tornado/">tornado</a></li></ul>
@@ -235,7 +394,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/09/05/Redis源码剖析-压缩列表/" data-id="cj79wds9m0004f467b42vzuv3" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/09/05/Redis源码剖析-压缩列表/" data-id="cj7bl7d5v0008st67pw5t6tt0" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
@@ -295,7 +454,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/08/29/Redis源码剖析-整数集合/" data-id="cj79wds9p0005f4679i9i5kaa" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/08/29/Redis源码剖析-整数集合/" data-id="cj7bl7d5r0005st67cuyzubne" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
@@ -363,7 +522,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/08/24/Redis源码剖析-跳跃表/" data-id="cj79wds9u0009f467qg1w0uiu" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/08/24/Redis源码剖析-跳跃表/" data-id="cj7bl7d61000bst67sx7ztege" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
@@ -430,7 +589,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/08/02/Redis源码剖析-dict遍历算法/" data-id="cj79wds9k0003f4679bc2fj94" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/08/02/Redis源码剖析-dict遍历算法/" data-id="cj7bl7d5m0003st67p4j9vpjb" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
@@ -499,7 +658,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/31/Redis源码剖析-dict字典/" data-id="cj79wds9f0001f4677ra2mgcv" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/31/Redis源码剖析-dict字典/" data-id="cj7bl7d5h0001st67vxyf1qv5" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
@@ -558,7 +717,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/31/Redis源码剖析-链表list/" data-id="cj79wdsa0000cf467zovz5j1f" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/31/Redis源码剖析-链表list/" data-id="cj7bl7d67000fst67ecf55ank" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
@@ -652,7 +811,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/28/Redis源码剖析-简单动态字符串sds/" data-id="cj79wds9t0008f467fg0ym1xo" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/28/Redis源码剖析-简单动态字符串sds/" data-id="cj7bl7d5x0009st671e0rq7ft" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
@@ -701,80 +860,10 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/25/Tornado-线程池应用/" data-id="cj79wdsa3000ef467xacunmbp" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/25/Tornado-线程池应用/" data-id="cj7bl7d69000hst67zyjwggrt" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Python/">Python</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Tornado/">Tornado</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-Json-Web-Token" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2017/07/25/Json-Web-Token/" class="article-date">
-  <time datetime="2017-07-25T03:13:15.000Z" itemprop="datePublished">2017-07-25</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2017/07/25/Json-Web-Token/">Json Web Token</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <h2 id="Token-Auth机制"><a href="#Token-Auth机制" class="headerlink" title="Token Auth机制"></a>Token Auth机制</h2><p>JSON Web Token（JWT）是一个非常轻巧的规范。这个规范允许我们使用JWT在用户和服务器之间传递安全可靠的信息。</p>
-<p>JWT通过用户发送用户名和密码给服务器，服务器验证通过之后，生成签名的token给客户端。客户端存储这个token，之后请求帐号相关的信息时带上token，服务端验证token之后，进行相应的处理。</p>
-<h3 id="相比cookie的优势"><a href="#相比cookie的优势" class="headerlink" title="相比cookie的优势"></a>相比cookie的优势</h3><p><strong>支持跨域站点访问</strong></p>
-<p>Cookie是不允许垮域访问的，可以通过设置顶级域名的方式实现部分跨域，但是跨站点的访问仍然不支持。</p>
-<p>Token没有站点的限制，跨域站点的时候仍旧能够使用。</p>
-<p><strong>安全性更高</strong></p>
-<p>不需要考虑对CSRF（跨站请求伪造）的防范；</p>
-<h3 id="相比session的优势"><a href="#相比session的优势" class="headerlink" title="相比session的优势"></a>相比session的优势</h3><p><strong>节省服务器空间</strong></p>
-<p>session验证方式需要在服务端保存每个session，会占用服务器空间。如果单纯用DB存储，还有性能上的劣势；用redis等存储则不太经济。</p>
-<p>Token方式将成本分摊到各个客户端，所需要的仅仅是一个解编码的过程。</p>
-<h2 id="JWT的组成"><a href="#JWT的组成" class="headerlink" title="JWT的组成"></a>JWT的组成</h2><p>JWT由三部分组成，分别是头部、载荷和签名。三个部分中间用点分隔开，并且都使用 Base64 编码。</p>
-<p>总体JWT示例：<br><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div></pre></td><td class="code"><pre><div class="line">eyJ0eXAiOiAiSldUIiwiYWxnIjogIkhTMjU2In0.eyJpc3MiOiAiaGFybGV5IiwiaWF0IjogMTUwMDk1NTk1MCwiZXhwIjogMTUwMDk1Nzk4NywidXNlcl9pZCI6ICI3ODk4IiwidXNlcl9yb2xlIjoiQWRtaW4ifQ.b0998815569be8f4ca8518030c3d586cc5bdff12dd7ad0004a1c38fa735ce18a</div></pre></td></tr></table></figure></p>
-<h3 id="头部（Header）"><a href="#头部（Header）" class="headerlink" title="头部（Header）"></a>头部（Header）</h3><p>header 部分主要包括两部分，一个是 Token 的类型，另一个是使用的算法，<br>比如Token类型是 JWT，使用的算法是 HS256。</p>
-<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div></pre></td><td class="code"><pre><div class="line">&#123;</div><div class="line">&quot;typ&quot;: &quot;JWT&quot;,</div><div class="line">&quot;alg&quot;: &quot;HS256&quot;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
-<p>经过base64编码之后的值为<br>eyJ0eXAiOiAiSldUIiwiYWxnIjogIkhTMjU2In0</p>
-<h3 id="有效载荷（payload）"><a href="#有效载荷（payload）" class="headerlink" title="有效载荷（payload）"></a>有效载荷（payload）</h3><p>有效载荷内部的数据可以自己定义，JWT规范也给出了一些标准字段，比如</p>
-<ul>
-<li>iss: 该JWT的签发者</li>
-<li>sub: 该JWT所面向的用户</li>
-<li>aud: 接收该JWT的一方</li>
-<li>exp(expires): 什么时候过期，这里是一个Unix时间戳</li>
-<li>iat(issued at): 在什么时候签发的</li>
-<li>jti(JWT ID）: 唯一的JWT ID</li>
-</ul>
-<p>比如payload内容如下：</p>
-<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div></pre></td><td class="code"><pre><div class="line">&#123;</div><div class="line">    &quot;iss&quot;: &quot;harley&quot;,</div><div class="line">    &quot;iat&quot;: 1500955950,</div><div class="line">    &quot;exp&quot;: 1500957987,</div><div class="line">    &quot;user_id&quot;: &quot;7898&quot;,</div><div class="line">    &quot;user_role&quot;: &quot;Admin&quot;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
-<p>base64加密后的结果为 eyJpc3MiOiAiaGFybGV5IiwiaWF0IjogMTUwMDk1NTk1MCwiZXhwIjogMTUwMDk1Nzk4NywidXNlcl9pZCI6ICI3ODk4IiwidXNlcl9yb2xlIjoiQWRtaW4ifQ</p>
-<h3 id="签名（signature）"><a href="#签名（signature）" class="headerlink" title="签名（signature）"></a>签名（signature）</h3><p>签名部分保证了token的安全性，signature的生成过程依赖前两部分的内容。<br>将Header和payload连接在一起，得到<br><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div></pre></td><td class="code"><pre><div class="line">eyJ0eXAiOiAiSldUIiwiYWxnIjogIkhTMjU2In0.eyJpc3MiOiAiaGFybGV5IiwiaWF0IjogMTUwMDk1NTk1MCwiZXhwIjogMTUwMDk1Nzk4NywidXNlcl9pZCI6ICI3ODk4IiwidXNlcl9yb2xlIjoiQWRtaW4ifQ</div></pre></td></tr></table></figure></p>
-<p>将上面拼接完的字符串用HS256算法进行加密。在加密的时候，还需要提供一个密钥。假设密钥为secret，那么就可以得到我们加密后的内容b0998815569be8f4ca8518030c3d586cc5bdff12dd7ad0004a1c38fa735ce18a</p>
-<p>加在后面得到完成JWT</p>
-<h2 id="JWT安全性"><a href="#JWT安全性" class="headerlink" title="JWT安全性"></a>JWT安全性</h2><p>JWT最后的签名部分对Header和payload进行了加密，如果Header和payload被篡改，最后的signature必然是不一样的。 由于加密时的secret是保密的，篡改者无法得到正确的签名。</p>
-<p>但同时要注意的是，由于header和payload部分并未加密，所以不能把敏感信息放入其中。</p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/25/Json-Web-Token/" data-id="cj79wds9a0000f467q01ofq8w" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JWT/">JWT</a></li></ul>
 
     </footer>
   </div>
@@ -831,6 +920,10 @@
       <ul>
         
           <li>
+            <a href="/2017/09/07/Redis源码剖析-对象Object/">Redis源码剖析--对象Object</a>
+          </li>
+        
+          <li>
             <a href="/2017/09/07/tornado-打印block日志/">tornado--打印block日志</a>
           </li>
         
@@ -844,10 +937,6 @@
         
           <li>
             <a href="/2017/08/24/Redis源码剖析-跳跃表/">Redis源码剖析--跳跃表</a>
-          </li>
-        
-          <li>
-            <a href="/2017/08/02/Redis源码剖析-dict遍历算法/">Redis源码剖析-dict遍历算法</a>
           </li>
         
       </ul>

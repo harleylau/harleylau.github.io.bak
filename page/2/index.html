@@ -61,6 +61,76 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-Json-Web-Token" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2017/07/25/Json-Web-Token/" class="article-date">
+  <time datetime="2017-07-25T03:13:15.000Z" itemprop="datePublished">2017-07-25</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2017/07/25/Json-Web-Token/">Json Web Token</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h2 id="Token-Auth机制"><a href="#Token-Auth机制" class="headerlink" title="Token Auth机制"></a>Token Auth机制</h2><p>JSON Web Token（JWT）是一个非常轻巧的规范。这个规范允许我们使用JWT在用户和服务器之间传递安全可靠的信息。</p>
+<p>JWT通过用户发送用户名和密码给服务器，服务器验证通过之后，生成签名的token给客户端。客户端存储这个token，之后请求帐号相关的信息时带上token，服务端验证token之后，进行相应的处理。</p>
+<h3 id="相比cookie的优势"><a href="#相比cookie的优势" class="headerlink" title="相比cookie的优势"></a>相比cookie的优势</h3><p><strong>支持跨域站点访问</strong></p>
+<p>Cookie是不允许垮域访问的，可以通过设置顶级域名的方式实现部分跨域，但是跨站点的访问仍然不支持。</p>
+<p>Token没有站点的限制，跨域站点的时候仍旧能够使用。</p>
+<p><strong>安全性更高</strong></p>
+<p>不需要考虑对CSRF（跨站请求伪造）的防范；</p>
+<h3 id="相比session的优势"><a href="#相比session的优势" class="headerlink" title="相比session的优势"></a>相比session的优势</h3><p><strong>节省服务器空间</strong></p>
+<p>session验证方式需要在服务端保存每个session，会占用服务器空间。如果单纯用DB存储，还有性能上的劣势；用redis等存储则不太经济。</p>
+<p>Token方式将成本分摊到各个客户端，所需要的仅仅是一个解编码的过程。</p>
+<h2 id="JWT的组成"><a href="#JWT的组成" class="headerlink" title="JWT的组成"></a>JWT的组成</h2><p>JWT由三部分组成，分别是头部、载荷和签名。三个部分中间用点分隔开，并且都使用 Base64 编码。</p>
+<p>总体JWT示例：<br><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div></pre></td><td class="code"><pre><div class="line">eyJ0eXAiOiAiSldUIiwiYWxnIjogIkhTMjU2In0.eyJpc3MiOiAiaGFybGV5IiwiaWF0IjogMTUwMDk1NTk1MCwiZXhwIjogMTUwMDk1Nzk4NywidXNlcl9pZCI6ICI3ODk4IiwidXNlcl9yb2xlIjoiQWRtaW4ifQ.b0998815569be8f4ca8518030c3d586cc5bdff12dd7ad0004a1c38fa735ce18a</div></pre></td></tr></table></figure></p>
+<h3 id="头部（Header）"><a href="#头部（Header）" class="headerlink" title="头部（Header）"></a>头部（Header）</h3><p>header 部分主要包括两部分，一个是 Token 的类型，另一个是使用的算法，<br>比如Token类型是 JWT，使用的算法是 HS256。</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div></pre></td><td class="code"><pre><div class="line">&#123;</div><div class="line">&quot;typ&quot;: &quot;JWT&quot;,</div><div class="line">&quot;alg&quot;: &quot;HS256&quot;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>经过base64编码之后的值为<br>eyJ0eXAiOiAiSldUIiwiYWxnIjogIkhTMjU2In0</p>
+<h3 id="有效载荷（payload）"><a href="#有效载荷（payload）" class="headerlink" title="有效载荷（payload）"></a>有效载荷（payload）</h3><p>有效载荷内部的数据可以自己定义，JWT规范也给出了一些标准字段，比如</p>
+<ul>
+<li>iss: 该JWT的签发者</li>
+<li>sub: 该JWT所面向的用户</li>
+<li>aud: 接收该JWT的一方</li>
+<li>exp(expires): 什么时候过期，这里是一个Unix时间戳</li>
+<li>iat(issued at): 在什么时候签发的</li>
+<li>jti(JWT ID）: 唯一的JWT ID</li>
+</ul>
+<p>比如payload内容如下：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div></pre></td><td class="code"><pre><div class="line">&#123;</div><div class="line">    &quot;iss&quot;: &quot;harley&quot;,</div><div class="line">    &quot;iat&quot;: 1500955950,</div><div class="line">    &quot;exp&quot;: 1500957987,</div><div class="line">    &quot;user_id&quot;: &quot;7898&quot;,</div><div class="line">    &quot;user_role&quot;: &quot;Admin&quot;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>base64加密后的结果为 eyJpc3MiOiAiaGFybGV5IiwiaWF0IjogMTUwMDk1NTk1MCwiZXhwIjogMTUwMDk1Nzk4NywidXNlcl9pZCI6ICI3ODk4IiwidXNlcl9yb2xlIjoiQWRtaW4ifQ</p>
+<h3 id="签名（signature）"><a href="#签名（signature）" class="headerlink" title="签名（signature）"></a>签名（signature）</h3><p>签名部分保证了token的安全性，signature的生成过程依赖前两部分的内容。<br>将Header和payload连接在一起，得到<br><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div></pre></td><td class="code"><pre><div class="line">eyJ0eXAiOiAiSldUIiwiYWxnIjogIkhTMjU2In0.eyJpc3MiOiAiaGFybGV5IiwiaWF0IjogMTUwMDk1NTk1MCwiZXhwIjogMTUwMDk1Nzk4NywidXNlcl9pZCI6ICI3ODk4IiwidXNlcl9yb2xlIjoiQWRtaW4ifQ</div></pre></td></tr></table></figure></p>
+<p>将上面拼接完的字符串用HS256算法进行加密。在加密的时候，还需要提供一个密钥。假设密钥为secret，那么就可以得到我们加密后的内容b0998815569be8f4ca8518030c3d586cc5bdff12dd7ad0004a1c38fa735ce18a</p>
+<p>加在后面得到完成JWT</p>
+<h2 id="JWT安全性"><a href="#JWT安全性" class="headerlink" title="JWT安全性"></a>JWT安全性</h2><p>JWT最后的签名部分对Header和payload进行了加密，如果Header和payload被篡改，最后的signature必然是不一样的。 由于加密时的secret是保密的，篡改者无法得到正确的签名。</p>
+<p>但同时要注意的是，由于header和payload部分并未加密，所以不能把敏感信息放入其中。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="https://harleylau.github.io/2017/07/25/Json-Web-Token/" data-id="cj7bl7d5a0000st67vrg5ymrs" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JWT/">JWT</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-hello-world" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2017/07/12/hello-world/" class="article-date">
@@ -96,7 +166,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/12/hello-world/" data-id="cj79wdsa6000gf467fw4lwkng" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/12/hello-world/" data-id="cj7bl7d6z0019st67xqilzy10" class="article-share-link">Share</a>
       
       
     </footer>
@@ -154,6 +224,10 @@
       <ul>
         
           <li>
+            <a href="/2017/09/07/Redis源码剖析-对象Object/">Redis源码剖析--对象Object</a>
+          </li>
+        
+          <li>
             <a href="/2017/09/07/tornado-打印block日志/">tornado--打印block日志</a>
           </li>
         
@@ -167,10 +241,6 @@
         
           <li>
             <a href="/2017/08/24/Redis源码剖析-跳跃表/">Redis源码剖析--跳跃表</a>
-          </li>
-        
-          <li>
-            <a href="/2017/08/02/Redis源码剖析-dict遍历算法/">Redis源码剖析-dict遍历算法</a>
           </li>
         
       </ul>
