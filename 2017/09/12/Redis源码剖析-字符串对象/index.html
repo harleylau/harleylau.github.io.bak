@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  <title>Redis源码剖析--字符串对象 | Harley_Lau</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="description" content="上一篇文章里分析了，字符串对象在redis的底层结构上有三种存储格式，分别是： int 、 raw 或者 embstr    类型 编码 对象     REDIS_STRING REDIS_ENCODING_INT 使用整数值实现的字符串对象。   REDIS_STRING REDIS_ENCODING_EMBSTR 使用 embstr 编码的简单动态字符串实现的字符串对象。   REDIS_ST">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Redis源码剖析--字符串对象">
+<meta property="og:url" content="https://harleylau.github.io/2017/09/12/Redis源码剖析-字符串对象/index.html">
+<meta property="og:site_name" content="Harley_Lau">
+<meta property="og:description" content="上一篇文章里分析了，字符串对象在redis的底层结构上有三种存储格式，分别是： int 、 raw 或者 embstr    类型 编码 对象     REDIS_STRING REDIS_ENCODING_INT 使用整数值实现的字符串对象。   REDIS_STRING REDIS_ENCODING_EMBSTR 使用 embstr 编码的简单动态字符串实现的字符串对象。   REDIS_ST">
+<meta property="og:updated_time" content="2017-10-23T01:49:28.000Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Redis源码剖析--字符串对象">
+<meta name="twitter:description" content="上一篇文章里分析了，字符串对象在redis的底层结构上有三种存储格式，分别是： int 、 raw 或者 embstr    类型 编码 对象     REDIS_STRING REDIS_ENCODING_INT 使用整数值实现的字符串对象。   REDIS_STRING REDIS_ENCODING_EMBSTR 使用 embstr 编码的简单动态字符串实现的字符串对象。   REDIS_ST">
+  
+    <link rel="alternate" href="/atom.xml" title="Harley_Lau" type="application/atom+xml">
+  
+  
+    <link rel="icon" href="/favicon.png">
+  
+  
+    <link href="//fonts.googleapis.com/css?family=Source+Code+Pro" rel="stylesheet" type="text/css">
+  
+  <link rel="stylesheet" href="/css/style.css">
+  
+
+</head>
+
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">Harley_Lau</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+          <a id="nav-rss-link" class="nav-icon" href="/atom.xml" title="RSS Feed"></a>
+        
+        <a id="nav-search-btn" class="nav-icon" title="搜索"></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="https://harleylau.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+      <div class="outer">
+        <section id="main"><article id="post-Redis源码剖析-字符串对象" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2017/09/12/Redis源码剖析-字符串对象/" class="article-date">
+  <time datetime="2017-09-12T01:58:09.000Z" itemprop="datePublished">2017-09-12</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="article-title" itemprop="name">
+      Redis源码剖析--字符串对象
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>上一篇文章里分析了，字符串对象在redis的底层结构上有三种存储格式，分别是： int 、 raw 或者 embstr</p>
+<table>
+<thead>
+<tr>
+<th>类型</th>
+<th>编码</th>
+<th>对象</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>REDIS_STRING</td>
+<td>REDIS_ENCODING_INT</td>
+<td>使用整数值实现的字符串对象。</td>
+</tr>
+<tr>
+<td>REDIS_STRING</td>
+<td>REDIS_ENCODING_EMBSTR</td>
+<td>使用 embstr 编码的简单动态字符串实现的字符串对象。</td>
+</tr>
+<tr>
+<td>REDIS_STRING</td>
+<td>REDIS_ENCODING_RAW</td>
+<td>使用简单动态字符串实现的字符串对象。</td>
+</tr>
+</tbody>
+</table>
+<p>那么这三种底层表示分别在什么情况下使用呢。</p>
+<ul>
+<li>如果一个字符串对象保存的是整数值， 并且这个整数值可以用 long 类型来表示， 那么字符串对象会将整数值保存在字符串对象结构的 ptr 属性里面， 并将字符串对象的编码设置为 REDIS_ENCODING_INT 。</li>
+<li>如果字符串对象保存的是一个字符串值， 并且这个字符串值的长度大于 39 字节， 那么字符串对象将使用一个简单动态字符串（SDS，这个之前的文章也分析过）来保存这个字符串值， 并将对象的编码设置为 raw 。</li>
+<li>如果字符串对象保存的是一个字符串值， 并且这个字符串值的长度小于等于 39 字节， 那么字符串对象将使用 embstr 编码的方式来保存这个字符串值。</li>
+</ul>
+<p>int的表示比较简单， raw的表示我们之前也分析过，这边多了一个embstr的方式，简单的分析一下。</p>
+<p>正常的创建Redis的对象，一般都需要创建两次，一次创建RedisObject结构，另一次创建ptr指向的实际存储的内容。比如raw 编码， 使用 redisObject 结构和 sdshdr 结构来表示字符串对象， 但 raw 编码会调用两次内存分配函数来分别创建 redisObject 结构和 sdshdr 结构。但是在存储比较小的字符串的时候，这边用了个小技巧，embstr 编码通过调用一次内存分配函数来分配一块连续的空间， 空间中依次包含 redisObject 和 sdshdr 两个结构。</p>
+<h2 id="编码的转换"><a href="#编码的转换" class="headerlink" title="编码的转换"></a>编码的转换</h2><p>int 和 embstr 在一定的条件下，会转化为 raw 格式的字符串。</p>
+<p>此外， int 编码的字符串对象和 raw 编码的字符串对象都能够进行修改，但是 Redis 没有为 embstr 编码的字符串对象编写任何相应的修改程序 ， 所以 embstr 编码的字符串对象实际上是只读的。</p>
+<p>当我们需要修改 embstr 编码的字符串， 程序会先将对象的编码从 embstr 转换成 raw ， 然后再执行修改命令； 所以 embstr 编码的字符串对象在执行修改命令之后， 总会变成一个 raw 编码的字符串对象。</p>
+<table>
+<thead>
+<tr>
+<th>命令</th>
+<th>int 编码的实现方法</th>
+<th>embstr 编码的实现方法</th>
+<th>raw 编码的实现方法</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SET</td>
+<td>使用 int 编码保存值。</td>
+<td>使用 embstr 编码保存值。</td>
+<td>使用 raw 编码保存值。</td>
+</tr>
+<tr>
+<td>GET</td>
+<td>拷贝对象所保存的整数值， 将这个拷贝转换成字符串值， 然后向客户端返回这个字符串值。</td>
+<td>直接向客户端返回字符串值。</td>
+<td>直接向客户端返回字符串值。</td>
+</tr>
+<tr>
+<td>APPEND</td>
+<td>将对象转换成 raw 编码， 然后按 raw 编码的方式执行此操作。</td>
+<td>将对象转换成 raw 编码， 然后按 raw 编码的方式执行此操作。</td>
+<td>调用 sdscatlen 函数， 将给定字符串追加到现有字符串的末尾。</td>
+</tr>
+<tr>
+<td>INCRBYFLOAT</td>
+<td>取出整数值并将其转换成 long double 类型的浮点数， 对这个浮点数进行加法计算， 然后将得出的浮点数结果保存起来。</td>
+<td>取出字符串值并尝试将其转换成 long double 类型的浮点数， 对这个浮点数进行加法计算， 然后将得出的浮点数结果保存起来。 如果字符串值不能被转换成浮点数， 那么向客户端返回一个错误。</td>
+<td>取出字符串值并尝试将其转换成 long double 类型的浮点数， 对这个浮点数进行加法计算， 然后将得出的浮点数结果保存起来。 如果字符串值不能被转换成浮点数， 那么向客户端返回一个错误。</td>
+</tr>
+<tr>
+<td>INCRBY</td>
+<td>对整数值进行加法计算， 得出的计算结果会作为整数被保存起来。</td>
+<td>embstr 编码不能执行此命令， 向客户端返回一个错误。</td>
+<td>raw 编码不能执行此命令， 向客户端返回一个错误。</td>
+</tr>
+<tr>
+<td>DECRBY</td>
+<td>对整数值进行减法计算， 得出的计算结果会作为整数被保存起来。</td>
+<td>embstr 编码不能执行此命令， 向客户端返回一个错误。</td>
+<td>raw 编码不能执行此命令， 向客户端返回一个错误。</td>
+</tr>
+<tr>
+<td>STRLEN</td>
+<td>拷贝对象所保存的整数值， 将这个拷贝转换成字符串值， 计算并返回这个字符串值的长度。</td>
+<td>调用 sdslen 函数， 返回字符串的长度。</td>
+<td>调用 sdslen 函数， 返回字符串的长度。</td>
+</tr>
+<tr>
+<td>SETRANGE</td>
+<td>将对象转换成 raw 编码， 然后按 raw 编码的方式执行此命令。</td>
+<td>将对象转换成 raw 编码， 然后按 raw 编码的方式执行此命令。</td>
+<td>将字符串特定索引上的值设置为给定的字符。</td>
+</tr>
+<tr>
+<td>GETRANGE</td>
+<td>拷贝对象所保存的整数值， 将这个拷贝转换成字符串值， 然后取出并返回字符串指定索引上的字符。</td>
+<td>直接取出并返回字符串指定索引上的字符。</td>
+<td>直接取出并返回字符串指定索引上的字符。</td>
+</tr>
+</tbody>
+</table>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="https://harleylau.github.io/2017/09/12/Redis源码剖析-字符串对象/" data-id="cjdjp9adp00044e68pppim28l" class="article-share-link">Share</a>
+      
+      
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+    <a href="/2018/02/12/tornado之WebSocket/" id="article-nav-newer" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Newer</strong>
+      <div class="article-nav-title">
+        
+          tornado之WebSocket
+        
+      </div>
+    </a>
+  
+  
+    <a href="/2017/09/07/Redis源码剖析-对象Object/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">Redis源码剖析--对象Object</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+</section>
+        
+          <aside id="sidebar">
+  
+    
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">标签</h3>
+    <div class="widget">
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/JWT/">JWT</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Python/">Python</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Tornado/">Tornado</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/redis/">redis</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/tornado/">tornado</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/源码/">源码</a></li></ul>
+    </div>
+  </div>
+
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">标签云</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/JWT/" style="font-size: 10px;">JWT</a> <a href="/tags/Python/" style="font-size: 10px;">Python</a> <a href="/tags/Tornado/" style="font-size: 10px;">Tornado</a> <a href="/tags/redis/" style="font-size: 20px;">redis</a> <a href="/tags/tornado/" style="font-size: 10px;">tornado</a> <a href="/tags/源码/" style="font-size: 20px;">源码</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">归档</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/02/">二月 2018</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">九月 2017</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">八月 2017</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">七月 2017</a></li></ul>
+    </div>
+  </div>
+
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">最新文章</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2018/02/12/tornado之WebSocket/">tornado之WebSocket</a>
+          </li>
+        
+          <li>
+            <a href="/2017/09/12/Redis源码剖析-字符串对象/">Redis源码剖析--字符串对象</a>
+          </li>
+        
+          <li>
+            <a href="/2017/09/07/Redis源码剖析-对象Object/">Redis源码剖析--对象Object</a>
+          </li>
+        
+          <li>
+            <a href="/2017/09/07/tornado-打印block日志/">tornado--打印block日志</a>
+          </li>
+        
+          <li>
+            <a href="/2017/09/05/Redis源码剖析-压缩列表/">Redis源码剖析--压缩列表</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      &copy; 2018 Harley Liu<br>
+      Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+</nav>
+    
+
+<script src="//ajax.googleapis.com/ajax/libs/jquery/2.0.3/jquery.min.js"></script>
+
+
+  <link rel="stylesheet" href="/fancybox/jquery.fancybox.css">
+  <script src="/fancybox/jquery.fancybox.pack.js"></script>
+
+
+<script src="/js/script.js"></script>
+
+  </div>
+</body>
+</html>

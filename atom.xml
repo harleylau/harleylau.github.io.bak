@@ -5,7 +5,7 @@
   <link href="/atom.xml" rel="self"/>
   
   <link href="https://harleylau.github.io/"/>
-  <updated>2017-09-08T07:55:18.000Z</updated>
+  <updated>2018-02-12T04:08:56.335Z</updated>
   <id>https://harleylau.github.io/</id>
   
   <author>
@@ -14,6 +14,168 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title>tornado之WebSocket</title>
+    <link href="https://harleylau.github.io/2018/02/12/tornado%E4%B9%8BWebSocket/"/>
+    <id>https://harleylau.github.io/2018/02/12/tornado之WebSocket/</id>
+    <published>2018-02-12T03:29:39.000Z</published>
+    <updated>2018-02-12T04:08:56.335Z</updated>
+    
+    <content type="html"><![CDATA[<p>##WebSocket</p>
+<p>WebSocket是HTML5开始提供的一种浏览器与服务器间进行全双工通讯的网络技术。 WebSocket通信协议于2011年被IETF定为标准RFC 6455，WebSocketAPI被W3C定为标准。 在WebSocket API中，浏览器和服务器只需要要做一个握手的动作，然后，浏览器和服务器之间就形成了一条快速通道。两者之间就直接可以数据互相传送。</p>
+<p>WebSocket是建立在 TCP 协议之上，与 HTTP 协议有着良好的兼容性。那么既然已经有了HTTP协议，为什么还需要一个WebSocket协议呢。这是因为HTTP只允许由客户端向服务端发送数据， 而无法直接由服务端主动向客户端推送信息。</p>
+<p>WebSocket 使得客户端和服务器之间的数据交换变得更加简单，允许服务端直接向客户端推送数据而不需要客户端进行请求，两者之间可以创建持久性的连接，并允许数据进行双向传送。WebSocket协议标识符是ws（如果加密，则为wss），服务器网址就是 URL。</p>
+<p>###1. Tornado的WebSocket模块<br>Tornado提供支持WebSocket的模块是tornado.websocket，其中提供了一个WebSocketHandler类用来处理通讯。</p>
+<p>WebSocketHandler.open()<br>当一个WebSocket连接建立后被调用。</p>
+<p>WebSocketHandler.on_message(message)<br>当客户端发送消息message过来时被调用，注意此方法必须被重写。</p>
+<p>WebSocketHandler.on_close()<br>当WebSocket连接关闭后被调用。</p>
+<p>WebSocketHandler.write_message(message, binary=False)<br>向客户端发送消息messagea，message可以是字符串或字典（字典会被转为json字符串）。若binary为False，则message以utf8编码发送；二进制模式（binary=True）时，可发送任何字节码。</p>
+<p>WebSocketHandler.close()<br>关闭WebSocket连接。</p>
+<p>WebSocketHandler.check_origin(origin)<br>判断源origin，对于符合条件（返回判断结果为True）的请求源origin允许其连接，否则返回403。可以重写此方法来解决WebSocket的跨域请求（如始终return True）。</p>
+<p>###2. WebSocket使用示例</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div></pre></td><td class="code"><pre><div class="line">class WebSocketHandler(tornado.websocket.WebSocketHandler):</div><div class="line">    def open(self):</div><div class="line">        self.application.cart.register(self.callback)</div><div class="line"></div><div class="line">    def on_close(self):</div><div class="line">        self.application.cart.unregister(self.callback)</div><div class="line"></div><div class="line">    def on_message(self):</div><div class="line">        pass</div><div class="line"></div><div class="line">    def callback(self,count):</div><div class="line">        self.write_message(&apos;&#123;&quot;count&quot;:&quot;%s&quot;&#125;&apos;%count)</div></pre></td></tr></table></figure>]]></content>
+    
+    <summary type="html">
+    
+      &lt;p&gt;##WebSocket&lt;/p&gt;
+&lt;p&gt;WebSocket是HTML5开始提供的一种浏览器与服务器间进行全双工通讯的网络技术。 WebSocket通信协议于2011年被IETF定为标准RFC 6455，WebSocketAPI被W3C定为标准。 在WebSocket API中
+    
+    </summary>
+    
+    
+  </entry>
+  
+  <entry>
+    <title>Redis源码剖析--字符串对象</title>
+    <link href="https://harleylau.github.io/2017/09/12/Redis%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90-%E5%AD%97%E7%AC%A6%E4%B8%B2%E5%AF%B9%E8%B1%A1/"/>
+    <id>https://harleylau.github.io/2017/09/12/Redis源码剖析-字符串对象/</id>
+    <published>2017-09-12T01:58:09.000Z</published>
+    <updated>2017-10-23T01:49:28.000Z</updated>
+    
+    <content type="html"><![CDATA[<p>上一篇文章里分析了，字符串对象在redis的底层结构上有三种存储格式，分别是： int 、 raw 或者 embstr</p>
+<table>
+<thead>
+<tr>
+<th>类型</th>
+<th>编码</th>
+<th>对象</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>REDIS_STRING</td>
+<td>REDIS_ENCODING_INT</td>
+<td>使用整数值实现的字符串对象。</td>
+</tr>
+<tr>
+<td>REDIS_STRING</td>
+<td>REDIS_ENCODING_EMBSTR</td>
+<td>使用 embstr 编码的简单动态字符串实现的字符串对象。</td>
+</tr>
+<tr>
+<td>REDIS_STRING</td>
+<td>REDIS_ENCODING_RAW</td>
+<td>使用简单动态字符串实现的字符串对象。</td>
+</tr>
+</tbody>
+</table>
+<p>那么这三种底层表示分别在什么情况下使用呢。</p>
+<ul>
+<li>如果一个字符串对象保存的是整数值， 并且这个整数值可以用 long 类型来表示， 那么字符串对象会将整数值保存在字符串对象结构的 ptr 属性里面， 并将字符串对象的编码设置为 REDIS_ENCODING_INT 。</li>
+<li>如果字符串对象保存的是一个字符串值， 并且这个字符串值的长度大于 39 字节， 那么字符串对象将使用一个简单动态字符串（SDS，这个之前的文章也分析过）来保存这个字符串值， 并将对象的编码设置为 raw 。</li>
+<li>如果字符串对象保存的是一个字符串值， 并且这个字符串值的长度小于等于 39 字节， 那么字符串对象将使用 embstr 编码的方式来保存这个字符串值。</li>
+</ul>
+<p>int的表示比较简单， raw的表示我们之前也分析过，这边多了一个embstr的方式，简单的分析一下。</p>
+<p>正常的创建Redis的对象，一般都需要创建两次，一次创建RedisObject结构，另一次创建ptr指向的实际存储的内容。比如raw 编码， 使用 redisObject 结构和 sdshdr 结构来表示字符串对象， 但 raw 编码会调用两次内存分配函数来分别创建 redisObject 结构和 sdshdr 结构。但是在存储比较小的字符串的时候，这边用了个小技巧，embstr 编码通过调用一次内存分配函数来分配一块连续的空间， 空间中依次包含 redisObject 和 sdshdr 两个结构。</p>
+<h2 id="编码的转换"><a href="#编码的转换" class="headerlink" title="编码的转换"></a>编码的转换</h2><p>int 和 embstr 在一定的条件下，会转化为 raw 格式的字符串。</p>
+<p>此外， int 编码的字符串对象和 raw 编码的字符串对象都能够进行修改，但是 Redis 没有为 embstr 编码的字符串对象编写任何相应的修改程序 ， 所以 embstr 编码的字符串对象实际上是只读的。</p>
+<p>当我们需要修改 embstr 编码的字符串， 程序会先将对象的编码从 embstr 转换成 raw ， 然后再执行修改命令； 所以 embstr 编码的字符串对象在执行修改命令之后， 总会变成一个 raw 编码的字符串对象。</p>
+<table>
+<thead>
+<tr>
+<th>命令</th>
+<th>int 编码的实现方法</th>
+<th>embstr 编码的实现方法</th>
+<th>raw 编码的实现方法</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SET</td>
+<td>使用 int 编码保存值。</td>
+<td>使用 embstr 编码保存值。</td>
+<td>使用 raw 编码保存值。</td>
+</tr>
+<tr>
+<td>GET</td>
+<td>拷贝对象所保存的整数值， 将这个拷贝转换成字符串值， 然后向客户端返回这个字符串值。</td>
+<td>直接向客户端返回字符串值。</td>
+<td>直接向客户端返回字符串值。</td>
+</tr>
+<tr>
+<td>APPEND</td>
+<td>将对象转换成 raw 编码， 然后按 raw 编码的方式执行此操作。</td>
+<td>将对象转换成 raw 编码， 然后按 raw 编码的方式执行此操作。</td>
+<td>调用 sdscatlen 函数， 将给定字符串追加到现有字符串的末尾。</td>
+</tr>
+<tr>
+<td>INCRBYFLOAT</td>
+<td>取出整数值并将其转换成 long double 类型的浮点数， 对这个浮点数进行加法计算， 然后将得出的浮点数结果保存起来。</td>
+<td>取出字符串值并尝试将其转换成 long double 类型的浮点数， 对这个浮点数进行加法计算， 然后将得出的浮点数结果保存起来。 如果字符串值不能被转换成浮点数， 那么向客户端返回一个错误。</td>
+<td>取出字符串值并尝试将其转换成 long double 类型的浮点数， 对这个浮点数进行加法计算， 然后将得出的浮点数结果保存起来。 如果字符串值不能被转换成浮点数， 那么向客户端返回一个错误。</td>
+</tr>
+<tr>
+<td>INCRBY</td>
+<td>对整数值进行加法计算， 得出的计算结果会作为整数被保存起来。</td>
+<td>embstr 编码不能执行此命令， 向客户端返回一个错误。</td>
+<td>raw 编码不能执行此命令， 向客户端返回一个错误。</td>
+</tr>
+<tr>
+<td>DECRBY</td>
+<td>对整数值进行减法计算， 得出的计算结果会作为整数被保存起来。</td>
+<td>embstr 编码不能执行此命令， 向客户端返回一个错误。</td>
+<td>raw 编码不能执行此命令， 向客户端返回一个错误。</td>
+</tr>
+<tr>
+<td>STRLEN</td>
+<td>拷贝对象所保存的整数值， 将这个拷贝转换成字符串值， 计算并返回这个字符串值的长度。</td>
+<td>调用 sdslen 函数， 返回字符串的长度。</td>
+<td>调用 sdslen 函数， 返回字符串的长度。</td>
+</tr>
+<tr>
+<td>SETRANGE</td>
+<td>将对象转换成 raw 编码， 然后按 raw 编码的方式执行此命令。</td>
+<td>将对象转换成 raw 编码， 然后按 raw 编码的方式执行此命令。</td>
+<td>将字符串特定索引上的值设置为给定的字符。</td>
+</tr>
+<tr>
+<td>GETRANGE</td>
+<td>拷贝对象所保存的整数值， 将这个拷贝转换成字符串值， 然后取出并返回字符串指定索引上的字符。</td>
+<td>直接取出并返回字符串指定索引上的字符。</td>
+<td>直接取出并返回字符串指定索引上的字符。</td>
+</tr>
+</tbody>
+</table>
+]]></content>
+    
+    <summary type="html">
+    
+      &lt;p&gt;上一篇文章里分析了，字符串对象在redis的底层结构上有三种存储格式，分别是： int 、 raw 或者 embstr&lt;/p&gt;
+&lt;table&gt;
+&lt;thead&gt;
+&lt;tr&gt;
+&lt;th&gt;类型&lt;/th&gt;
+&lt;th&gt;编码&lt;/th&gt;
+&lt;th&gt;对象&lt;/th&gt;
+&lt;/tr&gt;
+&lt;/thead&gt;
+&lt;
+    
+    </summary>
+    
+    
+  </entry>
   
   <entry>
     <title>Redis源码剖析--对象Object</title>

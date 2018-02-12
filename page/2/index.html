@@ -61,6 +61,149 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-Redis源码剖析-简单动态字符串sds" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2017/07/28/Redis源码剖析-简单动态字符串sds/" class="article-date">
+  <time datetime="2017-07-28T08:14:49.000Z" itemprop="datePublished">2017-07-28</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2017/07/28/Redis源码剖析-简单动态字符串sds/">Redis源码剖析--简单动态字符串sds</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>Redis 没有直接使用 C 语言传统的字符串表示， 而是自己构建了一种名为简单动态字符串（simple dynamic string，SDS）的抽象类型， 并将 SDS 用作 Redis 的默认字符串表示。</p>
+<p>Redis中所有的键都是用sds格式来保存的， 包括一部分值的保存，也是用的sds格式。</p>
+<h2 id="SDS的定义"><a href="#SDS的定义" class="headerlink" title="SDS的定义"></a>SDS的定义</h2><p>sds.h中的定义如下：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div></pre></td><td class="code"><pre><div class="line">/*</div><div class="line"> * 类型别名，用于指向 sdshdr 的 buf 属性</div><div class="line"> */</div><div class="line">typedef char *sds;</div></pre></td></tr></table></figure>
+<p>sds包含两部分，在最基本的字符数组之外，加了两个字符数组信息，还有一个类似header的信息，header中包括了一下几个部分：</p>
+<ul>
+<li>len：表示字符串真正的长度，不包含空终止字符</li>
+<li>alloc：表示字符串的最大容量，不包含Header和最后的空终止字符</li>
+<li>flags：表示header的类型</li>
+</ul>
+<p>这样做的好处是能够马上知道字符串的长度和剩余空间，而无需遍历一遍字符数组计算长度。</p>
+<p>同时，由于在c语言中一般都是通过字符数组最后的”\0”来判断字符串的结束，而sds可以无视这些特殊字符的存在，可以直接根据len来获取完整的字符串。</p>
+<p>此外，在修改字符串的时候，sds能够减少空间与分配的次数，提高运行效率，具体的可以稍后看代码中的实现。</p>
+<h2 id="SDS基本操作"><a href="#SDS基本操作" class="headerlink" title="SDS基本操作"></a>SDS基本操作</h2><h3 id="SDS初始化"><a href="#SDS初始化" class="headerlink" title="SDS初始化"></a>SDS初始化</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div><div class="line">36</div><div class="line">37</div><div class="line">38</div><div class="line">39</div><div class="line">40</div><div class="line">41</div><div class="line">42</div><div class="line">43</div><div class="line">44</div><div class="line">45</div><div class="line">46</div><div class="line">47</div><div class="line">48</div><div class="line">49</div><div class="line">50</div><div class="line">51</div><div class="line">52</div><div class="line">53</div><div class="line">54</div><div class="line">55</div><div class="line">56</div><div class="line">57</div><div class="line">58</div><div class="line">59</div><div class="line">60</div><div class="line">61</div></pre></td><td class="code"><pre><div class="line">sds sdsnewlen(const void *init, size_t initlen) &#123;</div><div class="line">    void *sh;</div><div class="line">    sds s;</div><div class="line">    //根据长度判断创建header的类型</div><div class="line">    char type = sdsReqType(initlen);</div><div class="line">    /* Empty strings are usually created in order to append. Use type 8</div><div class="line">     * since type 5 is not good at this. */</div><div class="line">    if (type == SDS_TYPE_5 &amp;&amp; initlen == 0) type = SDS_TYPE_8;</div><div class="line">    //获取header的长度</div><div class="line">    int hdrlen = sdsHdrSize(type);</div><div class="line">    unsigned char *fp; /* flags pointer. */</div><div class="line"></div><div class="line">    //分配空间，header长度+字符串长度+结束字符</div><div class="line">    sh = s_malloc(hdrlen+initlen+1);</div><div class="line">    if (!init)</div><div class="line">        memset(sh, 0, hdrlen+initlen+1);</div><div class="line">    if (sh == NULL) return NULL;</div><div class="line">    //s是字符串真正保存的地址</div><div class="line">    s = (char*)sh+hdrlen;</div><div class="line">    //fp表示header中的flag</div><div class="line">    fp = ((unsigned char*)s)-1;</div><div class="line">    switch(type) &#123;</div><div class="line">        case SDS_TYPE_5: &#123;</div><div class="line">            *fp = type | (initlen &lt;&lt; SDS_TYPE_BITS);</div><div class="line">            break;</div><div class="line">        &#125;</div><div class="line">        case SDS_TYPE_8: &#123;</div><div class="line">            SDS_HDR_VAR(8,s);</div><div class="line">            sh-&gt;len = initlen;</div><div class="line">            sh-&gt;alloc = initlen;</div><div class="line">            *fp = type;</div><div class="line">            break;</div><div class="line">        &#125;</div><div class="line">        case SDS_TYPE_16: &#123;</div><div class="line">            SDS_HDR_VAR(16,s);</div><div class="line">            sh-&gt;len = initlen;</div><div class="line">            sh-&gt;alloc = initlen;</div><div class="line">            *fp = type;</div><div class="line">            break;</div><div class="line">        &#125;</div><div class="line">        case SDS_TYPE_32: &#123;</div><div class="line">            SDS_HDR_VAR(32,s);</div><div class="line">            sh-&gt;len = initlen;</div><div class="line">            sh-&gt;alloc = initlen;</div><div class="line">            *fp = type;</div><div class="line">            break;</div><div class="line">        &#125;</div><div class="line">        case SDS_TYPE_64: &#123;</div><div class="line">            SDS_HDR_VAR(64,s);</div><div class="line">            sh-&gt;len = initlen;</div><div class="line">            sh-&gt;alloc = initlen;</div><div class="line">            *fp = type;</div><div class="line">            break;</div><div class="line">        &#125;</div><div class="line">    &#125;</div><div class="line">    if (initlen &amp;&amp; init)</div><div class="line">        //如果有初始内容，复制</div><div class="line">        memcpy(s, init, initlen);</div><div class="line">    s[initlen] = &apos;\0&apos;;</div><div class="line">    return s;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>根据初始化长度的不同，生成的header也不同</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div></pre></td><td class="code"><pre><div class="line">/* Note: sdshdr5 is never used, we just access the flags byte directly.</div><div class="line"> * However is here to document the layout of type 5 SDS strings. */</div><div class="line">struct __attribute__ ((__packed__)) sdshdr5 &#123;</div><div class="line">    unsigned char flags; /* 3 lsb of type, and 5 msb of string length */</div><div class="line">    char buf[];</div><div class="line">&#125;;</div><div class="line">struct __attribute__ ((__packed__)) sdshdr8 &#123;</div><div class="line">    uint8_t len; /* used */</div><div class="line">    uint8_t alloc; /* excluding the header and null terminator */</div><div class="line">    unsigned char flags; /* 3 lsb of type, 5 unused bits */</div><div class="line">    char buf[];</div><div class="line">&#125;;</div><div class="line">struct __attribute__ ((__packed__)) sdshdr16 &#123;</div><div class="line">    uint16_t len; /* used */</div><div class="line">    uint16_t alloc; /* excluding the header and null terminator */</div><div class="line">    unsigned char flags; /* 3 lsb of type, 5 unused bits */</div><div class="line">    char buf[];</div><div class="line">&#125;;</div><div class="line">struct __attribute__ ((__packed__)) sdshdr32 &#123;</div><div class="line">    uint32_t len; /* used */</div><div class="line">    uint32_t alloc; /* excluding the header and null terminator */</div><div class="line">    unsigned char flags; /* 3 lsb of type, 5 unused bits */</div><div class="line">    char buf[];</div><div class="line">&#125;;</div><div class="line">struct __attribute__ ((__packed__)) sdshdr64 &#123;</div><div class="line">    uint64_t len; /* used */</div><div class="line">    uint64_t alloc; /* excluding the header and null terminator */</div><div class="line">    unsigned char flags; /* 3 lsb of type, 5 unused bits */</div><div class="line">    char buf[];</div><div class="line">&#125;;</div></pre></td></tr></table></figure>
+<p>len表示已使用的长度， alloc表示分配的长度，包括header的长度和终止符，flag用来标记header的类型。</p>
+<h3 id="SDS复制函数"><a href="#SDS复制函数" class="headerlink" title="SDS复制函数"></a>SDS复制函数</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div></pre></td><td class="code"><pre><div class="line">/* Duplicate an sds string. */</div><div class="line">//输入sds， 返回复制成功后的地址</div><div class="line">sds sdsdup(const sds s) &#123;</div><div class="line">    return sdsnewlen(s, sdslen(s));</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<h3 id="SDS释放函数"><a href="#SDS释放函数" class="headerlink" title="SDS释放函数"></a>SDS释放函数</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div></pre></td><td class="code"><pre><div class="line">/* Free an sds string. No operation is performed if &apos;s&apos; is NULL. */</div><div class="line">void sdsfree(sds s) &#123;</div><div class="line">    if (s == NULL) return;</div><div class="line">    s_free((char*)s-sdsHdrSize(s[-1]));</div><div class="line">    //s[-1] 得到header中的flag， 然后通过sdsHdrSize获得header的大小， 相减得到header的地址</div><div class="line">    //s_free释放</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<h3 id="SDS扩容函数"><a href="#SDS扩容函数" class="headerlink" title="SDS扩容函数"></a>SDS扩容函数</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div><div class="line">36</div><div class="line">37</div><div class="line">38</div><div class="line">39</div><div class="line">40</div><div class="line">41</div><div class="line">42</div><div class="line">43</div><div class="line">44</div><div class="line">45</div><div class="line">46</div><div class="line">47</div><div class="line">48</div><div class="line">49</div><div class="line">50</div><div class="line">51</div><div class="line">52</div><div class="line">53</div><div class="line">54</div><div class="line">55</div><div class="line">56</div><div class="line">57</div><div class="line">58</div><div class="line">59</div></pre></td><td class="code"><pre><div class="line">/* Enlarge the free space at the end of the sds string so that the caller</div><div class="line"> * is sure that after calling this function can overwrite up to addlen</div><div class="line"> * bytes after the end of the string, plus one more byte for nul term.</div><div class="line"> *</div><div class="line"> * Note: this does not change the *length* of the sds string as returned</div><div class="line"> * by sdslen(), but only the free buffer space we have. */</div><div class="line">sds sdsMakeRoomFor(sds s, size_t addlen) &#123;</div><div class="line">    void *sh, *newsh;</div><div class="line">    // 获取 s 目前的空余空间长度</div><div class="line">    size_t avail = sdsavail(s);</div><div class="line">    size_t len, newlen;</div><div class="line">    char type, oldtype = s[-1] &amp; SDS_TYPE_MASK;</div><div class="line">    int hdrlen;</div><div class="line"></div><div class="line">    // s 目前的空余空间已经足够，无须再进行扩展，直接返回</div><div class="line">    /* Return ASAP if there is enough space left. */</div><div class="line">    if (avail &gt;= addlen) return s;</div><div class="line"></div><div class="line">    len = sdslen(s);</div><div class="line">    sh = (char*)s-sdsHdrSize(oldtype);</div><div class="line">    // s 最少需要的长度</div><div class="line">    newlen = (len+addlen);</div><div class="line">    if (newlen &lt; SDS_MAX_PREALLOC)</div><div class="line">        // 如果新长度小于 SDS_MAX_PREALLOC </div><div class="line">        // 那么为它分配两倍于所需长度的空间</div><div class="line">        newlen *= 2;</div><div class="line">    else</div><div class="line">        // 否则，分配长度为目前长度加上 SDS_MAX_PREALLOC</div><div class="line">        newlen += SDS_MAX_PREALLOC;</div><div class="line"></div><div class="line">    // 得到新的type类型</div><div class="line">    type = sdsReqType(newlen);</div><div class="line"></div><div class="line">    /* Don&apos;t use type 5: the user is appending to the string and type 5 is</div><div class="line">     * not able to remember empty space, so sdsMakeRoomFor() must be called</div><div class="line">     * at every appending operation. */</div><div class="line">    if (type == SDS_TYPE_5) type = SDS_TYPE_8;</div><div class="line"></div><div class="line">    hdrlen = sdsHdrSize(type);</div><div class="line">    if (oldtype==type) &#123;</div><div class="line">        // 如果前后类型不变, 无需更改header，realloc</div><div class="line">        newsh = s_realloc(sh, hdrlen+newlen+1);</div><div class="line">        if (newsh == NULL) return NULL;</div><div class="line">        s = (char*)newsh+hdrlen;</div><div class="line">    &#125; else &#123;</div><div class="line">        /* Since the header size changes, need to move the string forward,</div><div class="line">         * and can&apos;t use realloc */</div><div class="line">        newsh = s_malloc(hdrlen+newlen+1);</div><div class="line">        if (newsh == NULL) return NULL;</div><div class="line">        memcpy((char*)newsh+hdrlen, s, len+1);</div><div class="line">        s_free(sh);</div><div class="line">        s = (char*)newsh+hdrlen;</div><div class="line">        s[-1] = type;</div><div class="line">        sdssetlen(s, len);</div><div class="line">    &#125;</div><div class="line">    // 重新设置header中的alloc参数</div><div class="line">    sdssetalloc(s, newlen);</div><div class="line">    return s;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<ul>
+<li>当要增加字符在SDS之后的时候，先判断目前的剩余长度是否满足条件，如果慢煮条件，直接将字符串添加在后边</li>
+<li>如果当前的剩余空间不够，需要对SDS进行扩容。如果对 SDS 进行修改之后， SDS 的长度（也即是 len 属性的值）将小于 1 MB ， 那么程序分配和 len 属性同样大小的未使用空间， 这时 SDS len 属性的值将和 free 属性的值相同。 举个例子， 如果进行修改之后， SDS 的 len 将变成 13 字节， 那么程序也会分配 13 字节的未使用空间， SDS 的 buf 数组的实际长度将变成 13 + 13 + 1 = 27 字节（额外的一字节用于保存空字符）。</li>
+<li>如果对 SDS 进行修改之后， SDS 的长度将大于等于 1 MB ， 那么程序会分配 1 MB 的未使用空间。 比如， 如果进行修改之后， SDS 的 len 将变成 30 MB ， 那么程序会分配 1 MB 的未使用空间， SDS 的 buf 数组的实际长度将为 30 MB + 1 MB + 1 byte 。</li>
+</ul>
+<h2 id="SDS小结"><a href="#SDS小结" class="headerlink" title="SDS小结"></a>SDS小结</h2><p>SDS提供了一系列函数，不一一列出。 参考《redis设计与实现》一书的说明，SDS与C字符串的区别如下</p>
+<table>
+<thead>
+<tr>
+<th>C 字符串</th>
+<th>SDS</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>获取字符串长度的复杂度为 O(N) 。</td>
+<td>获取字符串长度的复杂度为 O(1) 。</td>
+</tr>
+<tr>
+<td>API 是不安全的，可能会造成缓冲区溢出。</td>
+<td>API 是安全的，不会造成缓冲区溢出。</td>
+</tr>
+<tr>
+<td>修改字符串长度 N 次必然需要执行 N 次内存重分配。</td>
+<td>修改字符串长度 N 次最多需要执行 N 次内存重分配。</td>
+</tr>
+<tr>
+<td>只能保存文本数据。</td>
+<td>可以保存文本或者二进制数据。</td>
+</tr>
+<tr>
+<td>可以使用所有 <string.h> 库中的函数。</string.h></td>
+<td>可以使用一部分 <string.h> 库中的函数。</string.h></td>
+</tr>
+</tbody>
+</table>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="https://harleylau.github.io/2017/07/28/Redis源码剖析-简单动态字符串sds/" data-id="cjdjp9ae6000c4e68ve5ollsc" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
+    <article id="post-Tornado-线程池应用" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2017/07/25/Tornado-线程池应用/" class="article-date">
+  <time datetime="2017-07-25T10:24:51.000Z" itemprop="datePublished">2017-07-25</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2017/07/25/Tornado-线程池应用/">Tornado 线程池应用</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>Tornado是一个异步框架，在异步操作的时候能提升程序的处理性能。但是如果在程序中碰到同步的逻辑，由于GIL的关系，会直接卡死，导致性能急剧下降。</p>
+<p>目前对于mongodb以及redis都有比较不错的异步框架，但是对于Mysql，目前的异步框架都不是很成熟。</p>
+<p>在实际应用中，由于一开始不是特别了解，在用了Tornado框架的同时，采用了Sqlalchemy来处理Mysql数据。但是由于这部分Mysql操作是同步的，在并发量上去的时候，不能及时返回，大量请求被拒绝。</p>
+<p>由于替换Sqlalchemy会造成很大的工作量，经过研究之后发现Tornado有run_on_executor，可以利用线程池达到异步化的目的。</p>
+<blockquote>
+<p>Decorator to run a synchronous method asynchronously on an executor.</p>
+<p>The decorated method may be called with a callback keyword argument and returns a future.</p>
+<p>The IOLoop and executor to be used are determined by the io_loop and executor attributes of self. To use different attributes, pass keyword arguments to the decorator</p>
+</blockquote>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div></pre></td><td class="code"><pre><div class="line">#!/bin/env python</div><div class="line">import tornado.httpserver</div><div class="line">import tornado.ioloop</div><div class="line">import tornado.options</div><div class="line">import tornado.web</div><div class="line">import tornado.httpclient</div><div class="line">import tornado.gen</div><div class="line">from tornado.concurrent import run_on_executor</div><div class="line"># 这个并发库在python3自带;在python2需要安装sudo pip install futures</div><div class="line">from concurrent.futures import ThreadPoolExecutor</div><div class="line">import time</div><div class="line">from tornado.options import define, options</div><div class="line">define(&quot;port&quot;, default=8002, help=&quot;run on the given port&quot;, type=int)</div><div class="line"></div><div class="line">class SleepHandler(tornado.web.RequestHandler):</div><div class="line">    executor = ThreadPoolExecutor(2)</div><div class="line"></div><div class="line">    def get(self):</div><div class="line">        tornado.ioloop.IOLoop.instance().add_callback(self.sleep)       # 这样将在下一轮事件循环执行self.sleep</div><div class="line">        self.write(&quot;when i sleep&quot;)</div><div class="line"></div><div class="line">    @run_on_executor</div><div class="line">    def sleep(self):</div><div class="line">        time.sleep(5)</div><div class="line">        print(&quot;yes&quot;)</div><div class="line">        return 5</div><div class="line"></div><div class="line"></div><div class="line">if __name__ == &quot;__main__&quot;:</div><div class="line">    tornado.options.parse_command_line()</div><div class="line">    app = tornado.web.Application(handlers=[</div><div class="line">            (r&quot;/sleep&quot;, SleepHandler), ])</div><div class="line">    http_server = tornado.httpserver.HTTPServer(app)</div><div class="line">    http_server.listen(options.port)</div><div class="line">    tornado.ioloop.IOLoop.instance().start()</div></pre></td></tr></table></figure>
+<p>当然也可以用celery来达到异步的效果，但是不如run_on_executor来的方便</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="https://harleylau.github.io/2017/07/25/Tornado-线程池应用/" data-id="cjdjp9aeh000m4e68nhaze89w" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Python/">Python</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/Tornado/">Tornado</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-Json-Web-Token" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2017/07/25/Json-Web-Token/" class="article-date">
@@ -119,7 +262,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/25/Json-Web-Token/" data-id="cj7bl7d5a0000st67vrg5ymrs" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/25/Json-Web-Token/" data-id="cjdjp9add00004e68wmwvpzbp" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/JWT/">JWT</a></li></ul>
@@ -166,7 +309,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/12/hello-world/" data-id="cj7bl7d6z0019st67xqilzy10" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/12/hello-world/" data-id="cjdjp9aed000h4e684ybs6st0" class="article-share-link">Share</a>
       
       
     </footer>
@@ -211,7 +354,7 @@
   <div class="widget-wrap">
     <h3 class="widget-title">归档</h3>
     <div class="widget">
-      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">九月 2017</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">八月 2017</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">七月 2017</a></li></ul>
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/02/">二月 2018</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">九月 2017</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">八月 2017</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">七月 2017</a></li></ul>
     </div>
   </div>
 
@@ -224,6 +367,14 @@
       <ul>
         
           <li>
+            <a href="/2018/02/12/tornado之WebSocket/">tornado之WebSocket</a>
+          </li>
+        
+          <li>
+            <a href="/2017/09/12/Redis源码剖析-字符串对象/">Redis源码剖析--字符串对象</a>
+          </li>
+        
+          <li>
             <a href="/2017/09/07/Redis源码剖析-对象Object/">Redis源码剖析--对象Object</a>
           </li>
         
@@ -233,14 +384,6 @@
         
           <li>
             <a href="/2017/09/05/Redis源码剖析-压缩列表/">Redis源码剖析--压缩列表</a>
-          </li>
-        
-          <li>
-            <a href="/2017/08/29/Redis源码剖析-整数集合/">Redis源码剖析--整数集合</a>
-          </li>
-        
-          <li>
-            <a href="/2017/08/24/Redis源码剖析-跳跃表/">Redis源码剖析--跳跃表</a>
           </li>
         
       </ul>
@@ -255,7 +398,7 @@
   
   <div class="outer">
     <div id="footer-info" class="inner">
-      &copy; 2017 Harley Liu<br>
+      &copy; 2018 Harley Liu<br>
       Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
     </div>
   </div>
