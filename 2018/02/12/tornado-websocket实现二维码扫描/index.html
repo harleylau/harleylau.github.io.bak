@@ -1,0 +1,224 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  <title>tornado websocket实现二维码扫描 | Harley_Lau</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="description" content="Websocket 实现扫码二维码登录首先简单的讲一下二维码实现登录的步骤：1、网页端向服务端请求二维码，服务端生成一个二维码提供给网页端； 这个二维码其实是一个地址2、客户端通过扫描网页端的二维码，跳转到二维码指向的地址， 然后通过鉴权验证机制，通知服务端鉴权的结果3、客户端端根据不同的鉴权结果通知网页端做出相应的动作 对于步骤有了简单的概念之后， 我们可以显而易见的看到整个流程中主要需要解决的">
+<meta name="keywords" content="tornado,websocket,二维码">
+<meta property="og:type" content="article">
+<meta property="og:title" content="tornado websocket实现二维码扫描">
+<meta property="og:url" content="https://harleylau.github.io/2018/02/12/tornado-websocket实现二维码扫描/index.html">
+<meta property="og:site_name" content="Harley_Lau">
+<meta property="og:description" content="Websocket 实现扫码二维码登录首先简单的讲一下二维码实现登录的步骤：1、网页端向服务端请求二维码，服务端生成一个二维码提供给网页端； 这个二维码其实是一个地址2、客户端通过扫描网页端的二维码，跳转到二维码指向的地址， 然后通过鉴权验证机制，通知服务端鉴权的结果3、客户端端根据不同的鉴权结果通知网页端做出相应的动作 对于步骤有了简单的概念之后， 我们可以显而易见的看到整个流程中主要需要解决的">
+<meta property="og:updated_time" content="2018-02-12T07:43:51.963Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="tornado websocket实现二维码扫描">
+<meta name="twitter:description" content="Websocket 实现扫码二维码登录首先简单的讲一下二维码实现登录的步骤：1、网页端向服务端请求二维码，服务端生成一个二维码提供给网页端； 这个二维码其实是一个地址2、客户端通过扫描网页端的二维码，跳转到二维码指向的地址， 然后通过鉴权验证机制，通知服务端鉴权的结果3、客户端端根据不同的鉴权结果通知网页端做出相应的动作 对于步骤有了简单的概念之后， 我们可以显而易见的看到整个流程中主要需要解决的">
+  
+    <link rel="alternate" href="/atom.xml" title="Harley_Lau" type="application/atom+xml">
+  
+  
+    <link rel="icon" href="/favicon.png">
+  
+  
+    <link href="//fonts.googleapis.com/css?family=Source+Code+Pro" rel="stylesheet" type="text/css">
+  
+  <link rel="stylesheet" href="/css/style.css">
+  
+
+</head>
+
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">Harley_Lau</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+          <a id="nav-rss-link" class="nav-icon" href="/atom.xml" title="RSS Feed"></a>
+        
+        <a id="nav-search-btn" class="nav-icon" title="搜索"></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="https://harleylau.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+      <div class="outer">
+        <section id="main"><article id="post-tornado-websocket实现二维码扫描" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2018/02/12/tornado-websocket实现二维码扫描/" class="article-date">
+  <time datetime="2018-02-12T04:17:11.000Z" itemprop="datePublished">2018-02-12</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="article-title" itemprop="name">
+      tornado websocket实现二维码扫描
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h2 id="Websocket-实现扫码二维码登录"><a href="#Websocket-实现扫码二维码登录" class="headerlink" title="Websocket 实现扫码二维码登录"></a>Websocket 实现扫码二维码登录</h2><p>首先简单的讲一下二维码实现登录的步骤：<br>1、网页端向服务端请求二维码，服务端生成一个二维码提供给网页端； 这个二维码其实是一个地址<br>2、客户端通过扫描网页端的二维码，跳转到二维码指向的地址， 然后通过鉴权验证机制，通知服务端鉴权的结果<br>3、客户端端根据不同的鉴权结果通知网页端做出相应的动作</p>
+<p>对于步骤有了简单的概念之后， 我们可以显而易见的看到整个流程中主要需要解决的主要是两个问题：</p>
+<p>1、如果处理用户的授权机制，保证用户权限的安全性</p>
+<p>2、如何让网页端根据用户在客户端上的选择及时的做出不同的响应</p>
+<p>针对第一个问题， 一方面，我们在生成二维码的时候，会同时生成一个唯一的session_id的标志，然后将其加入到二维码的url中， 当客户端扫描二维码跳转到指定地址的时候，能够根据session_id保证这个二维码是我们自己生成的； 另一方面， 客户端跳转过来的时候，会同时带上用户的id和用户的token， 通过id和token的验证保证用户的有效性，同时也能讲对应的session_id和用户id绑定，通知网页端是哪个用户扫描了这个二维码。</p>
+<p>另外，多讲一点， 客户端扫描的同时带上来的用户id和用户的token，在实际使用的时候，我们是用户在登录的时候通过OAuth2.0的鉴权逻辑获取的， 所以能直接通过token验证安全性。</p>
+<p>那么第二个问题， 如何及时的通知网页端做出变化呢。 这边一开始有两个方案： 一个是网页端采用轮询的机制，间隔一小段时间来询问服务端， 是否有用户扫描了这个二维码，以及扫描的结果； 另一个方案就是网页端在请求二维码的时候发起的就是一个websocket请求，这样网页端和服务端就能一直保持连接， 在客户端扫描二维码之后， 服务端就能够及时的通知到网页端，做到实时化。</p>
+<p>两者的优缺点相信也比较明显， 在实际的开发过程中，我们采用了websocket的方式。 这边其实还有一个问题， 用户在客户端扫描二维码并授权了之后，如果通知到对应的网页端呢。 在网页端请求二维码的同时，我们会将当前的请求以session_id为key的方式进行注册， 当客户端扫描或者授权的时候，会将这个session_id带上来， 根据这个session_id就可以取到对应的请求，然后发回操作结果给网页端。</p>
+<h2 id="tornado-websocket实现二维码扫描登录"><a href="#tornado-websocket实现二维码扫描登录" class="headerlink" title="tornado websocket实现二维码扫描登录"></a>tornado websocket实现二维码扫描登录</h2><h3 id="网页端请求二维码"><a href="#网页端请求二维码" class="headerlink" title="网页端请求二维码"></a>网页端请求二维码</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div></pre></td><td class="code"><pre><div class="line">@router.Route(&apos;qrcode&apos;, name=&apos;ConnectQRcode&apos;)</div><div class="line">class ConnectQRcode(tornado.websocket.WebSocketHandler):</div><div class="line">    @tornado.gen.coroutine</div><div class="line">    def open(self):</div><div class="line">    	 #生成唯一的id，并带在url中</div><div class="line">        req_id = id(self)</div><div class="line">        url = &quot;https://xxxxxxx?uid=&quot; + uid + &quot;&amp;req_id=&quot; + str(req_id)</div><div class="line">        # 根据URL生成对应的二维码</div><div class="line">        q = qrcode.main.QRCode()</div><div class="line">        q.add_data(url)</div><div class="line">        q.make()</div><div class="line">        m = q.make_image()</div><div class="line">        png_name = &quot;static/&quot; + uid + &quot;.png&quot;</div><div class="line">        m.save(png_name)</div><div class="line">        # 注册回调函数</div><div class="line">        self.application.cart.register(req_id, self.callback)</div><div class="line">        # 返回二维码</div><div class="line">        self.write_message(&quot;https://xxxx/&quot; + png_name)</div><div class="line"></div><div class="line"></div><div class="line">    def on_close(self):</div><div class="line">    	# 关闭的时候删除掉注册的回调函数</div><div class="line">        self.application.cart.unregister(id(self), self.callback)</div><div class="line">        logging.info(&quot;remove register&quot;)</div><div class="line">        logging.info(&apos;WebSocket closed&apos;)</div><div class="line"></div><div class="line">    def callback(self, event, extra_info):</div><div class="line">        # 回调函数具体的操作</div><div class="line">        self.write_message(xxxx)</div></pre></td></tr></table></figure>
+<h3 id="客户端扫描二维码"><a href="#客户端扫描二维码" class="headerlink" title="客户端扫描二维码"></a>客户端扫描二维码</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div></pre></td><td class="code"><pre><div class="line">@router.Route(&apos;/qrscan&apos;, name=&apos;qrscan&apos;)</div><div class="line">class ConnectQRscan(tornado.web.RequestHandler):</div><div class="line">    @tornado.gen.coroutine</div><div class="line">    def get(self):</div><div class="line">        try:</div><div class="line">            # 得到本次请求的req_id， 然后根据req_id调用对应的回调函数</div><div class="line">            req_id = self.get_argument(&apos;req_id&apos;, strip=False)</div><div class="line">            self.application.cart.notify(req_id, &quot;scan&quot;, &#123;&apos;req_id&apos;: req_id&#125;)</div><div class="line">            ret = &#123;&#125;</div><div class="line">        except Exception as e:</div><div class="line">            logging.error(&quot;qrscan error: %s&quot; % e)</div><div class="line">            ret = &#123;&apos;errorno&apos;: -1, &apos;errormsg&apos;: &quot;Error&quot;, &apos;data&apos;: None&#125;</div><div class="line">        self.write(ret)</div></pre></td></tr></table></figure>
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="https://harleylau.github.io/2018/02/12/tornado-websocket实现二维码扫描/" data-id="cjdjwxbwx000nhq68vuebp510" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/tornado/">tornado</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/websocket/">websocket</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/二维码/">二维码</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+  
+    <a href="/2018/02/12/tornado之WebSocket/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">tornado之WebSocket</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+</section>
+        
+          <aside id="sidebar">
+  
+    
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">标签</h3>
+    <div class="widget">
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/JWT/">JWT</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Python/">Python</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Tornado/">Tornado</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/redis/">redis</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/tornado/">tornado</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/websocket/">websocket</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/二维码/">二维码</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/源码/">源码</a></li></ul>
+    </div>
+  </div>
+
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">标签云</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/JWT/" style="font-size: 10px;">JWT</a> <a href="/tags/Python/" style="font-size: 10px;">Python</a> <a href="/tags/Tornado/" style="font-size: 10px;">Tornado</a> <a href="/tags/redis/" style="font-size: 20px;">redis</a> <a href="/tags/tornado/" style="font-size: 15px;">tornado</a> <a href="/tags/websocket/" style="font-size: 10px;">websocket</a> <a href="/tags/二维码/" style="font-size: 10px;">二维码</a> <a href="/tags/源码/" style="font-size: 20px;">源码</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">归档</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/02/">二月 2018</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">九月 2017</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">八月 2017</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">七月 2017</a></li></ul>
+    </div>
+  </div>
+
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">最新文章</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2018/02/12/tornado-websocket实现二维码扫描/">tornado websocket实现二维码扫描</a>
+          </li>
+        
+          <li>
+            <a href="/2018/02/12/tornado之WebSocket/">tornado之WebSocket</a>
+          </li>
+        
+          <li>
+            <a href="/2017/09/12/Redis源码剖析-字符串对象/">Redis源码剖析--字符串对象</a>
+          </li>
+        
+          <li>
+            <a href="/2017/09/07/Redis源码剖析-对象Object/">Redis源码剖析--对象Object</a>
+          </li>
+        
+          <li>
+            <a href="/2017/09/07/tornado-打印block日志/">tornado--打印block日志</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      &copy; 2018 Harley Liu<br>
+      Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+</nav>
+    
+
+<script src="//ajax.googleapis.com/ajax/libs/jquery/2.0.3/jquery.min.js"></script>
+
+
+  <link rel="stylesheet" href="/fancybox/jquery.fancybox.css">
+  <script src="/fancybox/jquery.fancybox.pack.js"></script>
+
+
+<script src="/js/script.js"></script>
+
+  </div>
+</body>
+</html>

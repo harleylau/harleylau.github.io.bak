@@ -61,6 +61,53 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-tornado-websocket实现二维码扫描" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2018/02/12/tornado-websocket实现二维码扫描/" class="article-date">
+  <time datetime="2018-02-12T04:17:11.000Z" itemprop="datePublished">2018-02-12</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2018/02/12/tornado-websocket实现二维码扫描/">tornado websocket实现二维码扫描</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <h2 id="Websocket-实现扫码二维码登录"><a href="#Websocket-实现扫码二维码登录" class="headerlink" title="Websocket 实现扫码二维码登录"></a>Websocket 实现扫码二维码登录</h2><p>首先简单的讲一下二维码实现登录的步骤：<br>1、网页端向服务端请求二维码，服务端生成一个二维码提供给网页端； 这个二维码其实是一个地址<br>2、客户端通过扫描网页端的二维码，跳转到二维码指向的地址， 然后通过鉴权验证机制，通知服务端鉴权的结果<br>3、客户端端根据不同的鉴权结果通知网页端做出相应的动作</p>
+<p>对于步骤有了简单的概念之后， 我们可以显而易见的看到整个流程中主要需要解决的主要是两个问题：</p>
+<p>1、如果处理用户的授权机制，保证用户权限的安全性</p>
+<p>2、如何让网页端根据用户在客户端上的选择及时的做出不同的响应</p>
+<p>针对第一个问题， 一方面，我们在生成二维码的时候，会同时生成一个唯一的session_id的标志，然后将其加入到二维码的url中， 当客户端扫描二维码跳转到指定地址的时候，能够根据session_id保证这个二维码是我们自己生成的； 另一方面， 客户端跳转过来的时候，会同时带上用户的id和用户的token， 通过id和token的验证保证用户的有效性，同时也能讲对应的session_id和用户id绑定，通知网页端是哪个用户扫描了这个二维码。</p>
+<p>另外，多讲一点， 客户端扫描的同时带上来的用户id和用户的token，在实际使用的时候，我们是用户在登录的时候通过OAuth2.0的鉴权逻辑获取的， 所以能直接通过token验证安全性。</p>
+<p>那么第二个问题， 如何及时的通知网页端做出变化呢。 这边一开始有两个方案： 一个是网页端采用轮询的机制，间隔一小段时间来询问服务端， 是否有用户扫描了这个二维码，以及扫描的结果； 另一个方案就是网页端在请求二维码的时候发起的就是一个websocket请求，这样网页端和服务端就能一直保持连接， 在客户端扫描二维码之后， 服务端就能够及时的通知到网页端，做到实时化。</p>
+<p>两者的优缺点相信也比较明显， 在实际的开发过程中，我们采用了websocket的方式。 这边其实还有一个问题， 用户在客户端扫描二维码并授权了之后，如果通知到对应的网页端呢。 在网页端请求二维码的同时，我们会将当前的请求以session_id为key的方式进行注册， 当客户端扫描或者授权的时候，会将这个session_id带上来， 根据这个session_id就可以取到对应的请求，然后发回操作结果给网页端。</p>
+<h2 id="tornado-websocket实现二维码扫描登录"><a href="#tornado-websocket实现二维码扫描登录" class="headerlink" title="tornado websocket实现二维码扫描登录"></a>tornado websocket实现二维码扫描登录</h2><h3 id="网页端请求二维码"><a href="#网页端请求二维码" class="headerlink" title="网页端请求二维码"></a>网页端请求二维码</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div></pre></td><td class="code"><pre><div class="line">@router.Route(&apos;qrcode&apos;, name=&apos;ConnectQRcode&apos;)</div><div class="line">class ConnectQRcode(tornado.websocket.WebSocketHandler):</div><div class="line">    @tornado.gen.coroutine</div><div class="line">    def open(self):</div><div class="line">    	 #生成唯一的id，并带在url中</div><div class="line">        req_id = id(self)</div><div class="line">        url = &quot;https://xxxxxxx?uid=&quot; + uid + &quot;&amp;req_id=&quot; + str(req_id)</div><div class="line">        # 根据URL生成对应的二维码</div><div class="line">        q = qrcode.main.QRCode()</div><div class="line">        q.add_data(url)</div><div class="line">        q.make()</div><div class="line">        m = q.make_image()</div><div class="line">        png_name = &quot;static/&quot; + uid + &quot;.png&quot;</div><div class="line">        m.save(png_name)</div><div class="line">        # 注册回调函数</div><div class="line">        self.application.cart.register(req_id, self.callback)</div><div class="line">        # 返回二维码</div><div class="line">        self.write_message(&quot;https://xxxx/&quot; + png_name)</div><div class="line"></div><div class="line"></div><div class="line">    def on_close(self):</div><div class="line">    	# 关闭的时候删除掉注册的回调函数</div><div class="line">        self.application.cart.unregister(id(self), self.callback)</div><div class="line">        logging.info(&quot;remove register&quot;)</div><div class="line">        logging.info(&apos;WebSocket closed&apos;)</div><div class="line"></div><div class="line">    def callback(self, event, extra_info):</div><div class="line">        # 回调函数具体的操作</div><div class="line">        self.write_message(xxxx)</div></pre></td></tr></table></figure>
+<h3 id="客户端扫描二维码"><a href="#客户端扫描二维码" class="headerlink" title="客户端扫描二维码"></a>客户端扫描二维码</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div></pre></td><td class="code"><pre><div class="line">@router.Route(&apos;/qrscan&apos;, name=&apos;qrscan&apos;)</div><div class="line">class ConnectQRscan(tornado.web.RequestHandler):</div><div class="line">    @tornado.gen.coroutine</div><div class="line">    def get(self):</div><div class="line">        try:</div><div class="line">            # 得到本次请求的req_id， 然后根据req_id调用对应的回调函数</div><div class="line">            req_id = self.get_argument(&apos;req_id&apos;, strip=False)</div><div class="line">            self.application.cart.notify(req_id, &quot;scan&quot;, &#123;&apos;req_id&apos;: req_id&#125;)</div><div class="line">            ret = &#123;&#125;</div><div class="line">        except Exception as e:</div><div class="line">            logging.error(&quot;qrscan error: %s&quot; % e)</div><div class="line">            ret = &#123;&apos;errorno&apos;: -1, &apos;errormsg&apos;: &quot;Error&quot;, &apos;data&apos;: None&#125;</div><div class="line">        self.write(ret)</div></pre></td></tr></table></figure>
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="https://harleylau.github.io/2018/02/12/tornado-websocket实现二维码扫描/" data-id="cjdjwxbwx000nhq68vuebp510" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/tornado/">tornado</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/websocket/">websocket</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/二维码/">二维码</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-tornado之WebSocket" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2018/02/12/tornado之WebSocket/" class="article-date">
@@ -97,7 +144,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2018/02/12/tornado之WebSocket/" data-id="cjdjpd7pj000h5w68h2mdcvss" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2018/02/12/tornado之WebSocket/" data-id="cjdjwxbx0000qhq68ij41byo4" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/tornado/">tornado</a></li></ul>
@@ -239,7 +286,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/09/12/Redis源码剖析-字符串对象/" data-id="cjdjpd7p400085w68wbnnx619" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/09/12/Redis源码剖析-字符串对象/" data-id="cjdjwxbvp0005hq68v2zwznnt" class="article-share-link">Share</a>
       
       
     </footer>
@@ -396,7 +443,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/09/07/Redis源码剖析-对象Object/" data-id="cjdjpd7ow00045w68n0mw10al" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/09/07/Redis源码剖析-对象Object/" data-id="cjdjwxbwj000bhq68194x2tqh" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
@@ -441,7 +488,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/09/07/tornado-打印block日志/" data-id="cjdjpd7ps000p5w68wdh1416i" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/09/07/tornado-打印block日志/" data-id="cjdjwxbx2000shq68gevewxvh" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/tornado/">tornado</a></li></ul>
@@ -582,7 +629,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/09/05/Redis源码剖析-压缩列表/" data-id="cjdjpd7p000055w68bo59ulsf" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/09/05/Redis源码剖析-压缩列表/" data-id="cjdjwxbvm0004hq68a7jbk0cc" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
@@ -642,7 +689,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/08/29/Redis源码剖析-整数集合/" data-id="cjdjpd7p700095w68j4g10v3y" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/08/29/Redis源码剖析-整数集合/" data-id="cjdjwxbvs0007hq687o6vza62" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
@@ -710,7 +757,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/08/24/Redis源码剖析-跳跃表/" data-id="cjdjpd7ph000f5w68bh04uz26" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/08/24/Redis源码剖析-跳跃表/" data-id="cjdjwxbwk000dhq68ejpjtila" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
@@ -777,7 +824,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/08/02/Redis源码剖析-dict遍历算法/" data-id="cjdjpd7ou00035w689s9cl5g4" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/08/02/Redis源码剖析-dict遍历算法/" data-id="cjdjwxbvk0003hq68weg2bp4x" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
@@ -846,66 +893,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/31/Redis源码剖析-dict字典/" data-id="cjdjpd7oo00015w68yayxqgvj" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-Redis源码剖析-链表list" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2017/07/31/Redis源码剖析-链表list/" class="article-date">
-  <time datetime="2017-07-31T04:15:30.000Z" itemprop="datePublished">2017-07-31</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2017/07/31/Redis源码剖析-链表list/">Redis源码剖析-链表list</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>Redis另一个基础的数据结构是链表，C并没有内置的链表结构，因此Redis自己实现了一个列表。</p>
-<p>除了链表键之外， 发布与订阅、慢查询、监视器等功能也用到了链表， Redis 服务器本身还使用链表来保存多个客户端的状态信息， 以及使用链表来构建客户端输出缓冲区。</p>
-<h2 id="List结构"><a href="#List结构" class="headerlink" title="List结构"></a>List结构</h2><p>双端链表结点定义如下：</p>
-<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div></pre></td><td class="code"><pre><div class="line">typedef struct listNode &#123;</div><div class="line">    struct listNode *prev; // 指向前一个结点</div><div class="line">    struct listNode *next;  // 指向后一个结点</div><div class="line">    void *value;   // 结点值</div><div class="line">&#125; listNode;</div></pre></td></tr></table></figure>
-<p>链表迭代器定义如下：</p>
-<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div></pre></td><td class="code"><pre><div class="line">typedef struct listIter &#123;  // 链表迭代器</div><div class="line">    listNode *next;   // 指向下一个结点</div><div class="line">    int direction;    // 标记迭代方向</div><div class="line">&#125; listIter;</div></pre></td></tr></table></figure>
-<p>关于迭代器的方向标记，定义的全局变量用来标记：</p>
-<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div></pre></td><td class="code"><pre><div class="line">/* Directions for iterators */</div><div class="line">#define AL_START_HEAD 0</div><div class="line">#define AL_START_TAIL 1</div></pre></td></tr></table></figure>
-<p>双端列表定义如下：</p>
-<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div></pre></td><td class="code"><pre><div class="line">// 双端列表定义</div><div class="line">typedef struct list &#123;</div><div class="line">    listNode *head;  // 链表头</div><div class="line">    listNode *tail;  // 链表尾</div><div class="line">    void *(*dup)(void *ptr);  // 列表复制函数</div><div class="line">    void (*free)(void *ptr);  // 列表释放函数</div><div class="line">    int (*match)(void *ptr, void *key);  // 列表匹配函数</div><div class="line">    unsigned long len;  // 列表长度</div><div class="line">&#125; list;</div></pre></td></tr></table></figure>
-<h2 id="链表操作"><a href="#链表操作" class="headerlink" title="链表操作"></a>链表操作</h2><h3 id="链表初始化"><a href="#链表初始化" class="headerlink" title="链表初始化"></a>链表初始化</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div></pre></td><td class="code"><pre><div class="line">/* Create a new list. The created list can be freed with</div><div class="line"> * AlFreeList(), but private value of every node need to be freed</div><div class="line"> * by the user before to call AlFreeList().</div><div class="line"> *</div><div class="line"> * On error, NULL is returned. Otherwise the pointer to the new list. */</div><div class="line">list *listCreate(void)</div><div class="line">&#123;</div><div class="line">    struct list *list;  // 定义链表指针</div><div class="line">    // 分配内存，如果分配失败，返回NULL</div><div class="line">    if ((list = zmalloc(sizeof(*list))) == NULL)</div><div class="line">        return NULL;</div><div class="line">    // 链表头尾初始化</div><div class="line">    list-&gt;head = list-&gt;tail = NULL;</div><div class="line">    // 长度赋初值</div><div class="line">    list-&gt;len = 0;</div><div class="line">    // 复制函数、释放函数、匹配函数初始化为NULL</div><div class="line">    list-&gt;dup = NULL;</div><div class="line">    list-&gt;free = NULL;</div><div class="line">    list-&gt;match = NULL;</div><div class="line">    return list;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
-<h3 id="链表清空"><a href="#链表清空" class="headerlink" title="链表清空"></a>链表清空</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div></pre></td><td class="code"><pre><div class="line">/* Remove all the elements from the list without destroying the list itself. */</div><div class="line">void listEmpty(list *list)</div><div class="line">&#123;</div><div class="line">    unsigned long len;</div><div class="line">    listNode *current, *next;</div><div class="line"></div><div class="line">    current = list-&gt;head;</div><div class="line">    len = list-&gt;len;</div><div class="line">    // 根据链表长度循环</div><div class="line">    while(len--) &#123;</div><div class="line">        next = current-&gt;next;</div><div class="line">        // 如果定义了链表释放函数，用释放函数释放结点</div><div class="line">        if (list-&gt;free) list-&gt;free(current-&gt;value);</div><div class="line">        zfree(current);</div><div class="line">        current = next;</div><div class="line">    &#125;</div><div class="line">    // 清空链表头尾结点及长度</div><div class="line">    list-&gt;head = list-&gt;tail = NULL;</div><div class="line">    list-&gt;len = 0;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
-<h3 id="链表头部插入结点"><a href="#链表头部插入结点" class="headerlink" title="链表头部插入结点"></a>链表头部插入结点</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div></pre></td><td class="code"><pre><div class="line">list *listAddNodeHead(list *list, void *value)</div><div class="line">&#123;</div><div class="line">    listNode *node;  // 新建链表结点</div><div class="line"></div><div class="line">    if ((node = zmalloc(sizeof(*node))) == NULL)  // 初始化结点，如果失败返回NULL</div><div class="line">        return NULL;</div><div class="line">    // 将value赋值给结点</div><div class="line">    node-&gt;value = value;</div><div class="line">    if (list-&gt;len == 0) &#123;</div><div class="line">        // 如果是第一个结点，头尾都指向该结点，该结点前后结点都为空</div><div class="line">        list-&gt;head = list-&gt;tail = node;</div><div class="line">        node-&gt;prev = node-&gt;next = NULL;</div><div class="line">    &#125; else &#123;</div><div class="line">        // 否则，将结点插入到链表头部</div><div class="line">        node-&gt;prev = NULL;</div><div class="line">        node-&gt;next = list-&gt;head;</div><div class="line">        list-&gt;head-&gt;prev = node;</div><div class="line">        list-&gt;head = node;</div><div class="line">    &#125;</div><div class="line">    // 链表长度加1</div><div class="line">    list-&gt;len++;</div><div class="line">    return list;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
-<h3 id="往任意位置插入结点"><a href="#往任意位置插入结点" class="headerlink" title="往任意位置插入结点"></a>往任意位置插入结点</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div></pre></td><td class="code"><pre><div class="line">list *listInsertNode(list *list, listNode *old_node, void *value, int after) &#123;</div><div class="line">    listNode *node;  // 新建结点</div><div class="line"></div><div class="line">    if ((node = zmalloc(sizeof(*node))) == NULL) //分配空间，失败返回NULL</div><div class="line">        return NULL;</div><div class="line">    node-&gt;value = value;</div><div class="line">    if (after) &#123;</div><div class="line">        // 如果有after标记，将新结点放在old_node后边；如果old_node是尾部，调整tail指向</div><div class="line">        node-&gt;prev = old_node;</div><div class="line">        node-&gt;next = old_node-&gt;next;</div><div class="line">        if (list-&gt;tail == old_node) &#123;</div><div class="line">            list-&gt;tail = node;</div><div class="line">        &#125;</div><div class="line">    &#125; else &#123;</div><div class="line">        // 否则，将新结点放在old_node前边， 如果old_node是头部，调整head指向</div><div class="line">        node-&gt;next = old_node;</div><div class="line">        node-&gt;prev = old_node-&gt;prev;</div><div class="line">        if (list-&gt;head == old_node) &#123;</div><div class="line">            list-&gt;head = node;</div><div class="line">        &#125;</div><div class="line">    &#125;</div><div class="line">    if (node-&gt;prev != NULL) &#123;</div><div class="line">        node-&gt;prev-&gt;next = node;</div><div class="line">    &#125;</div><div class="line">    if (node-&gt;next != NULL) &#123;</div><div class="line">        node-&gt;next-&gt;prev = node;</div><div class="line">    &#125;</div><div class="line">    list-&gt;len++;</div><div class="line">    return list;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
-<p>同时还提供了往链表尾部插入结点的函数，也是类似的操作。</p>
-<h3 id="结点释放函数"><a href="#结点释放函数" class="headerlink" title="结点释放函数"></a>结点释放函数</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div></pre></td><td class="code"><pre><div class="line">void listDelNode(list *list, listNode *node)</div><div class="line">&#123;</div><div class="line">    if (node-&gt;prev)</div><div class="line">        // 如果结点有前置结点，即非head结点，调整前置结点的next指向</div><div class="line">        node-&gt;prev-&gt;next = node-&gt;next;</div><div class="line">    else</div><div class="line">        // 否则，是head结点，调整head结点指向</div><div class="line">        list-&gt;head = node-&gt;next;</div><div class="line">    if (node-&gt;next)</div><div class="line">        // 如果结点有后置结点，即非tail结点，调整后置结点的prev指向</div><div class="line">        node-&gt;next-&gt;prev = node-&gt;prev;</div><div class="line">    else</div><div class="line">        // 否则，是tail结点，调整tail结点指向</div><div class="line">        list-&gt;tail = node-&gt;prev;</div><div class="line">    // 如果定义了free函数，调用本身的free函数释放</div><div class="line">    if (list-&gt;free) list-&gt;free(node-&gt;value);</div><div class="line">    zfree(node);</div><div class="line">    list-&gt;len--;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
-<h3 id="获得链表的迭代器"><a href="#获得链表的迭代器" class="headerlink" title="获得链表的迭代器"></a>获得链表的迭代器</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div></pre></td><td class="code"><pre><div class="line">listIter *listGetIterator(list *list, int direction)</div><div class="line">&#123;</div><div class="line">    listIter *iter; // 定义迭代器指针</div><div class="line"></div><div class="line">    if ((iter = zmalloc(sizeof(*iter))) == NULL) return NULL;  // 分配空间，失败返回NULL</div><div class="line">    if (direction == AL_START_HEAD)</div><div class="line">        // 如果从头开始，迭代器的next指向head</div><div class="line">        iter-&gt;next = list-&gt;head;</div><div class="line">    else</div><div class="line">        // 否则，从尾部开始，迭代器的next指向tail</div><div class="line">        iter-&gt;next = list-&gt;tail;</div><div class="line">    iter-&gt;direction = direction;</div><div class="line">    return iter;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
-<h3 id="获得迭代器的下一个结点"><a href="#获得迭代器的下一个结点" class="headerlink" title="获得迭代器的下一个结点"></a>获得迭代器的下一个结点</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div></pre></td><td class="code"><pre><div class="line">listNode *listNext(listIter *iter)</div><div class="line">&#123;</div><div class="line">    listNode *current = iter-&gt;next; // 根据迭代器的next指针得到下一个结点</div><div class="line"></div><div class="line">    if (current != NULL) &#123;</div><div class="line">        // 根据迭代器的方向，获得next的指向</div><div class="line">        if (iter-&gt;direction == AL_START_HEAD)</div><div class="line">            iter-&gt;next = current-&gt;next;</div><div class="line">        else</div><div class="line">            iter-&gt;next = current-&gt;prev;</div><div class="line">    &#125;</div><div class="line">    return current;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
-<h3 id="复制链表"><a href="#复制链表" class="headerlink" title="复制链表"></a>复制链表</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div></pre></td><td class="code"><pre><div class="line">list *listDup(list *orig)</div><div class="line">&#123;</div><div class="line">    list *copy;  // 定义复制的链表</div><div class="line">    listIter iter;</div><div class="line">    listNode *node;</div><div class="line"></div><div class="line">    if ((copy = listCreate()) == NULL)</div><div class="line">        return NULL;</div><div class="line">    // 复制相关的内置函数</div><div class="line">    copy-&gt;dup = orig-&gt;dup;</div><div class="line">    copy-&gt;free = orig-&gt;free;</div><div class="line">    copy-&gt;match = orig-&gt;match;</div><div class="line">    // 得到头结点的迭代器</div><div class="line">    listRewind(orig, &amp;iter);</div><div class="line">    while((node = listNext(&amp;iter)) != NULL) &#123;</div><div class="line">        void *value;</div><div class="line">        // 如果有定义自己的复制函数，调用其进行复制</div><div class="line">        if (copy-&gt;dup) &#123;</div><div class="line">            value = copy-&gt;dup(node-&gt;value);</div><div class="line">            if (value == NULL) &#123;</div><div class="line">                listRelease(copy);</div><div class="line">                return NULL;</div><div class="line">            &#125;</div><div class="line">        &#125; else</div><div class="line">            // 否则，直接复制结点值</div><div class="line">            value = node-&gt;value;</div><div class="line">        // 将结点加入到目标的尾部</div><div class="line">        if (listAddNodeTail(copy, value) == NULL) &#123;</div><div class="line">            listRelease(copy);</div><div class="line">            return NULL;</div><div class="line">        &#125;</div><div class="line">    &#125;</div><div class="line">    return copy;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
-<h3 id="链表旋转"><a href="#链表旋转" class="headerlink" title="链表旋转"></a>链表旋转</h3><p>其实就是将尾结点拿下来，放到头部</p>
-<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div></pre></td><td class="code"><pre><div class="line">/* Rotate the list removing the tail node and inserting it to the head. */</div><div class="line">void listRotate(list *list) &#123;</div><div class="line">    listNode *tail = list-&gt;tail;  // 得到尾结点</div><div class="line"></div><div class="line">    if (listLength(list) &lt;= 1) return; // 如果只有一个结点，无需进行后续的操作</div><div class="line"></div><div class="line">    /* Detach current tail */</div><div class="line">    list-&gt;tail = tail-&gt;prev;  // 链表的tail指向原来tail结点的前置结点，同时置next为空</div><div class="line">    list-&gt;tail-&gt;next = NULL;</div><div class="line">    /* Move it as head */</div><div class="line">    list-&gt;head-&gt;prev = tail;  // 将尾部挪下来的结点放到头部，将原来的head结点后移一个位置</div><div class="line">    tail-&gt;prev = NULL;</div><div class="line">    tail-&gt;next = list-&gt;head;</div><div class="line">    list-&gt;head = tail;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/07/31/Redis源码剖析-链表list/" data-id="cjdjpd7pc000b5w685mpjvtnp" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/07/31/Redis源码剖析-dict字典/" data-id="cjdjwxbv90000hq6874zznizq" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
@@ -933,7 +921,7 @@
   <div class="widget-wrap">
     <h3 class="widget-title">标签</h3>
     <div class="widget">
-      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/JWT/">JWT</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Python/">Python</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Tornado/">Tornado</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/redis/">redis</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/tornado/">tornado</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/源码/">源码</a></li></ul>
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/JWT/">JWT</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Python/">Python</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Tornado/">Tornado</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/redis/">redis</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/tornado/">tornado</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/websocket/">websocket</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/二维码/">二维码</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/源码/">源码</a></li></ul>
     </div>
   </div>
 
@@ -943,7 +931,7 @@
   <div class="widget-wrap">
     <h3 class="widget-title">标签云</h3>
     <div class="widget tagcloud">
-      <a href="/tags/JWT/" style="font-size: 10px;">JWT</a> <a href="/tags/Python/" style="font-size: 10px;">Python</a> <a href="/tags/Tornado/" style="font-size: 10px;">Tornado</a> <a href="/tags/redis/" style="font-size: 20px;">redis</a> <a href="/tags/tornado/" style="font-size: 15px;">tornado</a> <a href="/tags/源码/" style="font-size: 20px;">源码</a>
+      <a href="/tags/JWT/" style="font-size: 10px;">JWT</a> <a href="/tags/Python/" style="font-size: 10px;">Python</a> <a href="/tags/Tornado/" style="font-size: 10px;">Tornado</a> <a href="/tags/redis/" style="font-size: 20px;">redis</a> <a href="/tags/tornado/" style="font-size: 15px;">tornado</a> <a href="/tags/websocket/" style="font-size: 10px;">websocket</a> <a href="/tags/二维码/" style="font-size: 10px;">二维码</a> <a href="/tags/源码/" style="font-size: 20px;">源码</a>
     </div>
   </div>
 
@@ -965,6 +953,10 @@
       <ul>
         
           <li>
+            <a href="/2018/02/12/tornado-websocket实现二维码扫描/">tornado websocket实现二维码扫描</a>
+          </li>
+        
+          <li>
             <a href="/2018/02/12/tornado之WebSocket/">tornado之WebSocket</a>
           </li>
         
@@ -978,10 +970,6 @@
         
           <li>
             <a href="/2017/09/07/tornado-打印block日志/">tornado--打印block日志</a>
-          </li>
-        
-          <li>
-            <a href="/2017/09/05/Redis源码剖析-压缩列表/">Redis源码剖析--压缩列表</a>
           </li>
         
       </ul>

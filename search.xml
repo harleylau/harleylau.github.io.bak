@@ -3,6 +3,33 @@
   
     
     <entry>
+      <title><![CDATA[tornado websocket实现二维码扫描]]></title>
+      <url>/2018/02/12/tornado-websocket%E5%AE%9E%E7%8E%B0%E4%BA%8C%E7%BB%B4%E7%A0%81%E6%89%AB%E6%8F%8F/</url>
+      <content type="html"><![CDATA[<h2 id="Websocket-实现扫码二维码登录"><a href="#Websocket-实现扫码二维码登录" class="headerlink" title="Websocket 实现扫码二维码登录"></a>Websocket 实现扫码二维码登录</h2><p>首先简单的讲一下二维码实现登录的步骤：<br>1、网页端向服务端请求二维码，服务端生成一个二维码提供给网页端； 这个二维码其实是一个地址<br>2、客户端通过扫描网页端的二维码，跳转到二维码指向的地址， 然后通过鉴权验证机制，通知服务端鉴权的结果<br>3、客户端端根据不同的鉴权结果通知网页端做出相应的动作</p>
+<p>对于步骤有了简单的概念之后， 我们可以显而易见的看到整个流程中主要需要解决的主要是两个问题：</p>
+<p>1、如果处理用户的授权机制，保证用户权限的安全性</p>
+<p>2、如何让网页端根据用户在客户端上的选择及时的做出不同的响应</p>
+<p>针对第一个问题， 一方面，我们在生成二维码的时候，会同时生成一个唯一的session_id的标志，然后将其加入到二维码的url中， 当客户端扫描二维码跳转到指定地址的时候，能够根据session_id保证这个二维码是我们自己生成的； 另一方面， 客户端跳转过来的时候，会同时带上用户的id和用户的token， 通过id和token的验证保证用户的有效性，同时也能讲对应的session_id和用户id绑定，通知网页端是哪个用户扫描了这个二维码。</p>
+<p>另外，多讲一点， 客户端扫描的同时带上来的用户id和用户的token，在实际使用的时候，我们是用户在登录的时候通过OAuth2.0的鉴权逻辑获取的， 所以能直接通过token验证安全性。</p>
+<p>那么第二个问题， 如何及时的通知网页端做出变化呢。 这边一开始有两个方案： 一个是网页端采用轮询的机制，间隔一小段时间来询问服务端， 是否有用户扫描了这个二维码，以及扫描的结果； 另一个方案就是网页端在请求二维码的时候发起的就是一个websocket请求，这样网页端和服务端就能一直保持连接， 在客户端扫描二维码之后， 服务端就能够及时的通知到网页端，做到实时化。</p>
+<p>两者的优缺点相信也比较明显， 在实际的开发过程中，我们采用了websocket的方式。 这边其实还有一个问题， 用户在客户端扫描二维码并授权了之后，如果通知到对应的网页端呢。 在网页端请求二维码的同时，我们会将当前的请求以session_id为key的方式进行注册， 当客户端扫描或者授权的时候，会将这个session_id带上来， 根据这个session_id就可以取到对应的请求，然后发回操作结果给网页端。</p>
+<h2 id="tornado-websocket实现二维码扫描登录"><a href="#tornado-websocket实现二维码扫描登录" class="headerlink" title="tornado websocket实现二维码扫描登录"></a>tornado websocket实现二维码扫描登录</h2><h3 id="网页端请求二维码"><a href="#网页端请求二维码" class="headerlink" title="网页端请求二维码"></a>网页端请求二维码</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div></pre></td><td class="code"><pre><div class="line">@router.Route(&apos;qrcode&apos;, name=&apos;ConnectQRcode&apos;)</div><div class="line">class ConnectQRcode(tornado.websocket.WebSocketHandler):</div><div class="line">    @tornado.gen.coroutine</div><div class="line">    def open(self):</div><div class="line">    	 #生成唯一的id，并带在url中</div><div class="line">        req_id = id(self)</div><div class="line">        url = &quot;https://xxxxxxx?uid=&quot; + uid + &quot;&amp;req_id=&quot; + str(req_id)</div><div class="line">        # 根据URL生成对应的二维码</div><div class="line">        q = qrcode.main.QRCode()</div><div class="line">        q.add_data(url)</div><div class="line">        q.make()</div><div class="line">        m = q.make_image()</div><div class="line">        png_name = &quot;static/&quot; + uid + &quot;.png&quot;</div><div class="line">        m.save(png_name)</div><div class="line">        # 注册回调函数</div><div class="line">        self.application.cart.register(req_id, self.callback)</div><div class="line">        # 返回二维码</div><div class="line">        self.write_message(&quot;https://xxxx/&quot; + png_name)</div><div class="line"></div><div class="line"></div><div class="line">    def on_close(self):</div><div class="line">    	# 关闭的时候删除掉注册的回调函数</div><div class="line">        self.application.cart.unregister(id(self), self.callback)</div><div class="line">        logging.info(&quot;remove register&quot;)</div><div class="line">        logging.info(&apos;WebSocket closed&apos;)</div><div class="line"></div><div class="line">    def callback(self, event, extra_info):</div><div class="line">        # 回调函数具体的操作</div><div class="line">        self.write_message(xxxx)</div></pre></td></tr></table></figure>
+<h3 id="客户端扫描二维码"><a href="#客户端扫描二维码" class="headerlink" title="客户端扫描二维码"></a>客户端扫描二维码</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div></pre></td><td class="code"><pre><div class="line">@router.Route(&apos;/qrscan&apos;, name=&apos;qrscan&apos;)</div><div class="line">class ConnectQRscan(tornado.web.RequestHandler):</div><div class="line">    @tornado.gen.coroutine</div><div class="line">    def get(self):</div><div class="line">        try:</div><div class="line">            # 得到本次请求的req_id， 然后根据req_id调用对应的回调函数</div><div class="line">            req_id = self.get_argument(&apos;req_id&apos;, strip=False)</div><div class="line">            self.application.cart.notify(req_id, &quot;scan&quot;, &#123;&apos;req_id&apos;: req_id&#125;)</div><div class="line">            ret = &#123;&#125;</div><div class="line">        except Exception as e:</div><div class="line">            logging.error(&quot;qrscan error: %s&quot; % e)</div><div class="line">            ret = &#123;&apos;errorno&apos;: -1, &apos;errormsg&apos;: &quot;Error&quot;, &apos;data&apos;: None&#125;</div><div class="line">        self.write(ret)</div></pre></td></tr></table></figure>]]></content>
+      
+        
+        <tags>
+            
+            <tag> tornado </tag>
+            
+            <tag> websocket </tag>
+            
+            <tag> 二维码 </tag>
+            
+        </tags>
+        
+    </entry>
+    
+    <entry>
       <title><![CDATA[tornado之WebSocket]]></title>
       <url>/2018/02/12/tornado%E4%B9%8BWebSocket/</url>
       <content type="html"><![CDATA[<h2 id="WebSocket"><a href="#WebSocket" class="headerlink" title="WebSocket"></a>WebSocket</h2><p>WebSocket是HTML5开始提供的一种浏览器与服务器间进行全双工通讯的网络技术。 WebSocket通信协议于2011年被IETF定为标准RFC 6455，WebSocketAPI被W3C定为标准。 在WebSocket API中，浏览器和服务器只需要要做一个握手的动作，然后，浏览器和服务器之间就形成了一条快速通道。两者之间就直接可以数据互相传送。</p>
