@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  
+  <title>Redis源码剖析--字符串t_string实现 | Harley_Lau</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <meta name="description" content="介绍完Redis的底层数据结构之后， 介绍我们平时使用Redis的时候可以直接看到五种数据结构：字符串、哈希、链表、集合和有序集合。 首先介绍字符串t_string的实现。 字符串的结构上一篇文章讲到过字符串的底层实现其实有三种编码：    类型 编码 对象     REDIS_STRING REDIS_ENCODING_INT 使用整数值实现的字符串对象。   REDIS_STRING REDI">
+<meta name="keywords" content="redis,源码">
+<meta property="og:type" content="article">
+<meta property="og:title" content="Redis源码剖析--字符串t_string实现">
+<meta property="og:url" content="https://harleylau.github.io/2018/05/09/Redis源码剖析-字符串t-string实现/index.html">
+<meta property="og:site_name" content="Harley_Lau">
+<meta property="og:description" content="介绍完Redis的底层数据结构之后， 介绍我们平时使用Redis的时候可以直接看到五种数据结构：字符串、哈希、链表、集合和有序集合。 首先介绍字符串t_string的实现。 字符串的结构上一篇文章讲到过字符串的底层实现其实有三种编码：    类型 编码 对象     REDIS_STRING REDIS_ENCODING_INT 使用整数值实现的字符串对象。   REDIS_STRING REDI">
+<meta property="og:updated_time" content="2018-05-10T01:45:44.838Z">
+<meta name="twitter:card" content="summary">
+<meta name="twitter:title" content="Redis源码剖析--字符串t_string实现">
+<meta name="twitter:description" content="介绍完Redis的底层数据结构之后， 介绍我们平时使用Redis的时候可以直接看到五种数据结构：字符串、哈希、链表、集合和有序集合。 首先介绍字符串t_string的实现。 字符串的结构上一篇文章讲到过字符串的底层实现其实有三种编码：    类型 编码 对象     REDIS_STRING REDIS_ENCODING_INT 使用整数值实现的字符串对象。   REDIS_STRING REDI">
+  
+    <link rel="alternate" href="/atom.xml" title="Harley_Lau" type="application/atom+xml">
+  
+  
+    <link rel="icon" href="/favicon.png">
+  
+  
+    <link href="//fonts.googleapis.com/css?family=Source+Code+Pro" rel="stylesheet" type="text/css">
+  
+  <link rel="stylesheet" href="/css/style.css">
+  
+
+</head>
+
+<body>
+  <div id="container">
+    <div id="wrap">
+      <header id="header">
+  <div id="banner"></div>
+  <div id="header-outer" class="outer">
+    <div id="header-title" class="inner">
+      <h1 id="logo-wrap">
+        <a href="/" id="logo">Harley_Lau</a>
+      </h1>
+      
+    </div>
+    <div id="header-inner" class="inner">
+      <nav id="main-nav">
+        <a id="main-nav-toggle" class="nav-icon"></a>
+        
+          <a class="main-nav-link" href="/">Home</a>
+        
+          <a class="main-nav-link" href="/archives">Archives</a>
+        
+      </nav>
+      <nav id="sub-nav">
+        
+          <a id="nav-rss-link" class="nav-icon" href="/atom.xml" title="RSS Feed"></a>
+        
+        <a id="nav-search-btn" class="nav-icon" title="搜索"></a>
+      </nav>
+      <div id="search-form-wrap">
+        <form action="//google.com/search" method="get" accept-charset="UTF-8" class="search-form"><input type="search" name="q" class="search-form-input" placeholder="Search"><button type="submit" class="search-form-submit">&#xF002;</button><input type="hidden" name="sitesearch" value="https://harleylau.github.io"></form>
+      </div>
+    </div>
+  </div>
+</header>
+      <div class="outer">
+        <section id="main"><article id="post-Redis源码剖析-字符串t-string实现" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2018/05/09/Redis源码剖析-字符串t-string实现/" class="article-date">
+  <time datetime="2018-05-09T02:12:07.000Z" itemprop="datePublished">2018-05-09</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 class="article-title" itemprop="name">
+      Redis源码剖析--字符串t_string实现
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>介绍完Redis的底层数据结构之后， 介绍我们平时使用Redis的时候可以直接看到五种数据结构：字符串、哈希、链表、集合和有序集合。</p>
+<p>首先介绍字符串t_string的实现。</p>
+<h2 id="字符串的结构"><a href="#字符串的结构" class="headerlink" title="字符串的结构"></a>字符串的结构</h2><p>上一篇文章讲到过字符串的底层实现其实有三种编码：</p>
+<table>
+<thead>
+<tr>
+<th>类型</th>
+<th>编码</th>
+<th>对象</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>REDIS_STRING</td>
+<td>REDIS_ENCODING_INT</td>
+<td>使用整数值实现的字符串对象。</td>
+</tr>
+<tr>
+<td>REDIS_STRING</td>
+<td>REDIS_ENCODING_EMBSTR</td>
+<td>使用 embstr 编码的简单动态字符串实现的字符串对象。</td>
+</tr>
+<tr>
+<td>REDIS_STRING</td>
+<td>REDIS_ENCODING_RAW</td>
+<td>使用简单动态字符串实现的字符串对象。</td>
+</tr>
+</tbody>
+</table>
+<p>这三种类型分别对应的底层数据结构为int，embstr, sds。</p>
+<p>字符串的定义代码如下：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div></pre></td><td class="code"><pre><div class="line">typedef struct redisObject &#123;</div><div class="line">    //对象的数据类型，字符串对象应该为 OBJ_STRING</div><div class="line">    unsigned type:4;        </div><div class="line">    //对象的编码类型，分别为OBJ_STRING、OBJ_ENCODING_INT或OBJ_ENCODING_EMBSTR</div><div class="line">    unsigned encoding:4;</div><div class="line">    //LRU_BITS为24位，最近一次的访问时间</div><div class="line">    unsigned lru:LRU_BITS; /* lru time (relative to server.lruclock) */</div><div class="line">    //引用计数</div><div class="line">    int refcount;</div><div class="line">    //指向底层数据实现的指针</div><div class="line">    void *ptr;</div><div class="line">&#125; robj;</div></pre></td></tr></table></figure>
+<p>那么字符串具体用哪种编码实现呢？</p>
+<p>如果一个字符串对象保存的是整数值， 并且这个整数值可以用 long 类型来表示， 那么字符串对象会将整数值保存在字符串对象结构的 ptr 属性里面（将 void* 转换成 long ）， 并将字符串对象的编码设置为 int 。</p>
+<p>如果字符串对象保存的是一个字符串值， 并且这个字符串值的长度大于 39 字节， 那么字符串对象将使用一个简单动态字符串（SDS）来保存这个字符串值， 并将对象的编码设置为 raw 。</p>
+<p>如果字符串对象保存的是一个字符串值， 并且这个字符串值的长度小于等于 39 字节， 那么字符串对象将使用 embstr 编码的方式来保存这个字符串值。</p>
+<p>embstr 编码是专门用于保存短字符串的一种优化编码方式， 这种编码和 raw 编码一样， 都使用 redisObject 结构和 sdshdr 结构来表示字符串对象， 但 raw 编码会调用两次内存分配函数来分别创建 redisObject 结构和 sdshdr 结构， 而 embstr 编码则通过调用一次内存分配函数来分配一块连续的空间， 空间中依次包含 redisObject 和 sdshdr 两个结构</p>
+<p>这边采用int和embstr编码的原因是：相较于raw格式的2次分配内存， 这两种格式只需要一次分配内存空间就可以；并且在回收的时候，也只需要调用一次内存释放函数。在存储小的字符串的时候更有速度优势。</p>
+<h2 id="字符串命令"><a href="#字符串命令" class="headerlink" title="字符串命令"></a>字符串命令</h2><p>字符串支持的命令如下：</p>
+<table>
+<thead>
+<tr>
+<th>命令</th>
+<th>命令描述</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SET key value [ex 秒数][px 毫秒数][nx/xx]</td>
+<td>设置指定key的值</td>
+</tr>
+<tr>
+<td>GET key</td>
+<td>获取指定key的值</td>
+</tr>
+<tr>
+<td>APPEND key value</td>
+<td>将value追加到指定key的值末尾</td>
+</tr>
+<tr>
+<td>INCRBY key increment</td>
+<td>将指定key的值加上增量increment</td>
+</tr>
+<tr>
+<td>DECRBY key decrement</td>
+<td>将指定key的值减去增量decrement</td>
+</tr>
+<tr>
+<td>STRLEN key</td>
+<td>返回指定key的值长度</td>
+</tr>
+<tr>
+<td>SETRANGE key offset value</td>
+<td>将value覆写到指定key的值上，从offset位开始</td>
+</tr>
+<tr>
+<td>GETRANGE key start end</td>
+<td>获取指定key中字符串的子串[start,end]</td>
+</tr>
+<tr>
+<td>MSET key value [key value …]</td>
+<td>一次设定多个key的值</td>
+</tr>
+<tr>
+<td>MGET key1 [key2..]</td>
+<td>一次获取多个key的值</td>
+</tr>
+</tbody>
+</table>
+<h2 id="字符串命令实现"><a href="#字符串命令实现" class="headerlink" title="字符串命令实现"></a>字符串命令实现</h2><h3 id="set命令的实现"><a href="#set命令的实现" class="headerlink" title="set命令的实现"></a>set命令的实现</h3><p>set命令用于设置指定的值，其具体命令格式如下：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div></pre></td><td class="code"><pre><div class="line">set key value [ex 秒数] [px 毫秒数] [nx/xx]</div></pre></td></tr></table></figure>
+<p>其中，各个选项的含义如下：</p>
+<ul>
+<li>ex 设置指定的到期时间，单位为秒</li>
+<li>px 设置指定的到期时间，单位为毫秒</li>
+<li>nx 只有在key不存在的时候，才设置key的值</li>
+<li>xx 只有key存在时，才对key进行设置操作</li>
+</ul>
+<p>set命令是调用setCommand实现的：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div><div class="line">36</div><div class="line">37</div><div class="line">38</div><div class="line">39</div><div class="line">40</div><div class="line">41</div><div class="line">42</div><div class="line">43</div><div class="line">44</div><div class="line">45</div><div class="line">46</div><div class="line">47</div><div class="line">48</div><div class="line">49</div><div class="line">50</div><div class="line">51</div><div class="line">52</div><div class="line">53</div><div class="line">54</div><div class="line">55</div></pre></td><td class="code"><pre><div class="line">// 关于set命令的操作有三种宏定义</div><div class="line">#define OBJ_SET_NO_FLAGS 0    // 没有设定参数</div><div class="line">#define OBJ_SET_NX (1&lt;&lt;0)     // 只有键不存在时才设定其值</div><div class="line">#define OBJ_SET_XX (1&lt;&lt;1)      // 只有键存在时才设定其值</div><div class="line">#define OBJ_SET_EX (1&lt;&lt;2)       // ex属性，到期时间单位为秒</div><div class="line">#define OBJ_SET_PX (1&lt;&lt;3)     	// px属性，到期时间单位为毫秒</div><div class="line"></div><div class="line">/* set命令实现函数 */</div><div class="line">void setCommand(client *c) &#123;</div><div class="line">    int j;</div><div class="line">    robj *expire = NULL;</div><div class="line">    int unit = UNIT_SECONDS;</div><div class="line">  	// 用于标记ex/px和nx/xx命令参数</div><div class="line">    int flags = OBJ_SET_NO_FLAGS;</div><div class="line">	// 从命令串的第四个参数开始，查看其是否设定了ex/px和nx/xx</div><div class="line">    for (j = 3; j &lt; c-&gt;argc; j++) &#123;</div><div class="line">        char *a = c-&gt;argv[j]-&gt;ptr;</div><div class="line">        robj *next = (j == c-&gt;argc-1) ? NULL : c-&gt;argv[j+1];</div><div class="line">        if ((a[0] == &apos;n&apos; || a[0] == &apos;N&apos;) &amp;&amp;</div><div class="line">            (a[1] == &apos;x&apos; || a[1] == &apos;X&apos;) &amp;&amp; a[2] == &apos;\0&apos; &amp;&amp;</div><div class="line">            !(flags &amp; OBJ_SET_XX)) // 标记</div><div class="line">        &#123;</div><div class="line">            flags |= OBJ_SET_NX;</div><div class="line">        &#125; else if ((a[0] == &apos;x&apos; || a[0] == &apos;X&apos;) &amp;&amp;</div><div class="line">                   (a[1] == &apos;x&apos; || a[1] == &apos;X&apos;) &amp;&amp; a[2] == &apos;\0&apos; &amp;&amp;</div><div class="line">                   !(flags &amp; OBJ_SET_NX))</div><div class="line">        &#123;</div><div class="line">            flags |= OBJ_SET_XX;</div><div class="line">        &#125; else if ((a[0] == &apos;e&apos; || a[0] == &apos;E&apos;) &amp;&amp;</div><div class="line">                   (a[1] == &apos;x&apos; || a[1] == &apos;X&apos;) &amp;&amp; a[2] == &apos;\0&apos; &amp;&amp;</div><div class="line">                   !(flags &amp; OBJ_SET_PX) &amp;&amp; next)</div><div class="line">        &#123;</div><div class="line">            flags |= OBJ_SET_EX;</div><div class="line">            unit = UNIT_SECONDS;</div><div class="line">            expire = next;</div><div class="line">            j++;</div><div class="line">        &#125; else if ((a[0] == &apos;p&apos; || a[0] == &apos;P&apos;) &amp;&amp;</div><div class="line">                   (a[1] == &apos;x&apos; || a[1] == &apos;X&apos;) &amp;&amp; a[2] == &apos;\0&apos; &amp;&amp;</div><div class="line">                   !(flags &amp; OBJ_SET_EX) &amp;&amp; next)</div><div class="line">        &#123;</div><div class="line">            flags |= OBJ_SET_PX;</div><div class="line">            unit = UNIT_MILLISECONDS;</div><div class="line">            expire = next;</div><div class="line">            j++;</div><div class="line">        &#125; else &#123;</div><div class="line">          	// 如果不是上述参数，则需要报错，命令错误</div><div class="line">            addReply(c,shared.syntaxerr);</div><div class="line">            return;</div><div class="line">        &#125;</div><div class="line">    &#125;</div><div class="line">    // 判断value是否可以编码成整数，如果能则编码；反之不做处理</div><div class="line">    c-&gt;argv[2] = tryObjectEncoding(c-&gt;argv[2]);</div><div class="line">    // 调用底层函数进行键值对设定</div><div class="line">    setGenericCommand(c,flags,c-&gt;argv[1],c-&gt;argv[2],expire,unit,NULL,NULL);</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>函数的一开始先检查传入的参数，看是否设定了过期时间以及过期时间的精度等，然后设置对应的flag， 最后根据flag调用setGenericCommand实现具体的操作。</p>
+<p>接下去看一下setGenericCommand函数的实现：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div><div class="line">36</div><div class="line">37</div><div class="line">38</div><div class="line">39</div><div class="line">40</div><div class="line">41</div><div class="line">42</div><div class="line">43</div><div class="line">44</div><div class="line">45</div><div class="line">46</div><div class="line">47</div><div class="line">48</div><div class="line">49</div><div class="line">50</div><div class="line">51</div><div class="line">52</div><div class="line">53</div></pre></td><td class="code"><pre><div class="line">//setGenericCommand()函数是以下命令: SET, SETEX, PSETEX, SETNX.的最底层实现</div><div class="line">//flags 可以是NX或XX，由上面的宏提供</div><div class="line">//expire 定义key的过期时间，格式由unit指定</div><div class="line">//ok_reply和abort_reply保存着回复client的内容，NX和XX也会改变回复</div><div class="line">//如果ok_reply为空，则使用 &quot;+OK&quot;</div><div class="line">//如果abort_reply为空，则使用 &quot;$-1&quot;</div><div class="line">void setGenericCommand(client *c, int flags, robj *key, robj *val, robj *expire, int unit, robj *ok_reply, robj *abort_reply) &#123;</div><div class="line">    long long milliseconds = 0; /* initialized to avoid any harmness warning */ //初始化，避免错误</div><div class="line"></div><div class="line">    //如果定义了key的过期时间</div><div class="line">    if (expire) &#123;</div><div class="line">        //从expire对象中取出值，保存在milliseconds中，如果出错发送默认的信息给client</div><div class="line">        if (getLongLongFromObjectOrReply(c, expire, &amp;milliseconds, NULL) != C_OK)</div><div class="line">            return;</div><div class="line">        // 如果过期时间小于等于0，则发送错误信息给client</div><div class="line">        if (milliseconds &lt;= 0) &#123;</div><div class="line">            addReplyErrorFormat(c,&quot;invalid expire time in %s&quot;,c-&gt;cmd-&gt;name);</div><div class="line">            return;</div><div class="line">        &#125;</div><div class="line">        //如果unit的单位是秒，则需要转换为毫秒保存</div><div class="line">        if (unit == UNIT_SECONDS) milliseconds *= 1000;</div><div class="line">    &#125;</div><div class="line"></div><div class="line">    //lookupKeyWrite函数是为执行写操作而取出key的值对象</div><div class="line">    //如果设置了NX(不存在)，并且在数据库中 找到 该key，或者</div><div class="line">    //设置了XX(存在)，并且在数据库中 没有找到 该key</div><div class="line">    //回复abort_reply给client</div><div class="line">    if ((flags &amp; OBJ_SET_NX &amp;&amp; lookupKeyWrite(c-&gt;db,key) != NULL) ||</div><div class="line">        (flags &amp; OBJ_SET_XX &amp;&amp; lookupKeyWrite(c-&gt;db,key) == NULL))</div><div class="line">    &#123;</div><div class="line">        addReply(c, abort_reply ? abort_reply : shared.nullbulk);</div><div class="line">        return;</div><div class="line">    &#125;</div><div class="line">    //在当前db设置键为key的值为val</div><div class="line">    setKey(c-&gt;db,key,val);</div><div class="line"></div><div class="line">    //设置数据库为脏(dirty)，服务器每次修改一个key后，都会对脏键(dirty)增1</div><div class="line">    server.dirty++;</div><div class="line"></div><div class="line">    //设置key的过期时间</div><div class="line">    //mstime()返回毫秒为单位的格林威治时间</div><div class="line">    if (expire) setExpire(c-&gt;db,key,mstime()+milliseconds);</div><div class="line"></div><div class="line">    //发送&quot;set&quot;事件的通知，用于发布订阅模式，通知客户端接受发生的事件</div><div class="line">    notifyKeyspaceEvent(NOTIFY_STRING,&quot;set&quot;,key,c-&gt;db-&gt;id);</div><div class="line"></div><div class="line">    //发送&quot;expire&quot;事件通知</div><div class="line">    if (expire) notifyKeyspaceEvent(NOTIFY_GENERIC,</div><div class="line">        &quot;expire&quot;,key,c-&gt;db-&gt;id);</div><div class="line"></div><div class="line">    //设置成功，则向客户端发送ok_reply</div><div class="line">    addReply(c, ok_reply ? ok_reply : shared.ok);</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<h3 id="get命令的实现"><a href="#get命令的实现" class="headerlink" title="get命令的实现"></a>get命令的实现</h3><p>类似于set命令，get命令也是最终调用一个getGenericcommand的函数实现：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div></pre></td><td class="code"><pre><div class="line">//GET 命令的底层实现</div><div class="line">int getGenericCommand(client *c) &#123;</div><div class="line">    robj *o;</div><div class="line"></div><div class="line">    //lookupKeyReadOrReply函数是为执行读操作而返回key的值对象，找到返回该对象，找不到会发送信息给client</div><div class="line">    //如果key不存在直接，返回0表示GET命令执行成功</div><div class="line">    if ((o = lookupKeyReadOrReply(c,c-&gt;argv[1],shared.nullbulk)) == NULL)</div><div class="line">        return C_OK;</div><div class="line"></div><div class="line">    //如果key的值的编码类型不是字符串对象</div><div class="line">    if (o-&gt;type != OBJ_STRING) &#123;</div><div class="line">        addReply(c,shared.wrongtypeerr);    //返回类型错误的信息给client，返回-1表示GET命令执行失败</div><div class="line">        return C_ERR;</div><div class="line">    &#125; else &#123;</div><div class="line">        addReplyBulk(c,o);  //返回之前找到的对象作为回复给client，返回0表示GET命令执行成功</div><div class="line">        return C_OK;</div><div class="line">    &#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<h2 id="编码的转换"><a href="#编码的转换" class="headerlink" title="编码的转换"></a>编码的转换</h2><p>上边说到字符串类型底层其实有三种数据类型，这三种数据类型在特定的情况下也会互相转换。</p>
+<h3 id="int编码转换为raw编码"><a href="#int编码转换为raw编码" class="headerlink" title="int编码转换为raw编码"></a>int编码转换为raw编码</h3><p>对于 int 编码的字符串对象来说， 如果我们向对象执行了一些命令， 使得这个对象保存的不再是整数值， 而是一个字符串值， 比如在最开始的数字类型后边执行了一个append的操作，加上了一串字符串，那么字符串对象的编码将从 int 变为 raw 。</p>
+<h3 id="embstr编码转换为raw编码"><a href="#embstr编码转换为raw编码" class="headerlink" title="embstr编码转换为raw编码"></a>embstr编码转换为raw编码</h3><p>因为 Redis 没有为 embstr 编码的字符串对象编写任何相应的修改程序 （只有 int 编码的字符串对象和 raw 编码的字符串对象有这些程序）， 所以 embstr 编码的字符串对象实际上是只读的： 当我们对 embstr 编码的字符串对象执行任何修改命令时， 程序会先将对象的编码从 embstr 转换成 raw ， 然后再执行修改命令； 因为这个原因， embstr 编码的字符串对象在执行修改命令之后， 总会变成一个 raw 编码的字符串对象。</p>
+
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="https://harleylau.github.io/2018/05/09/Redis源码剖析-字符串t-string实现/" data-id="cjgzvfysx0001ts68e3mxlttx" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
+
+    </footer>
+  </div>
+  
+    
+<nav id="article-nav">
+  
+  
+    <a href="/2018/02/12/tornado-websocket实现二维码扫描/" id="article-nav-older" class="article-nav-link-wrap">
+      <strong class="article-nav-caption">Older</strong>
+      <div class="article-nav-title">tornado websocket实现二维码扫描</div>
+    </a>
+  
+</nav>
+
+  
+</article>
+
+</section>
+        
+          <aside id="sidebar">
+  
+    
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">标签</h3>
+    <div class="widget">
+      <ul class="tag-list"><li class="tag-list-item"><a class="tag-list-link" href="/tags/JWT/">JWT</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Python/">Python</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/Tornado/">Tornado</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/redis/">redis</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/tornado/">tornado</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/websocket/">websocket</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/二维码/">二维码</a></li><li class="tag-list-item"><a class="tag-list-link" href="/tags/源码/">源码</a></li></ul>
+    </div>
+  </div>
+
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">标签云</h3>
+    <div class="widget tagcloud">
+      <a href="/tags/JWT/" style="font-size: 10px;">JWT</a> <a href="/tags/Python/" style="font-size: 10px;">Python</a> <a href="/tags/Tornado/" style="font-size: 10px;">Tornado</a> <a href="/tags/redis/" style="font-size: 20px;">redis</a> <a href="/tags/tornado/" style="font-size: 15px;">tornado</a> <a href="/tags/websocket/" style="font-size: 10px;">websocket</a> <a href="/tags/二维码/" style="font-size: 10px;">二维码</a> <a href="/tags/源码/" style="font-size: 20px;">源码</a>
+    </div>
+  </div>
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">归档</h3>
+    <div class="widget">
+      <ul class="archive-list"><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/05/">五月 2018</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2018/02/">二月 2018</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/09/">九月 2017</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/08/">八月 2017</a></li><li class="archive-list-item"><a class="archive-list-link" href="/archives/2017/07/">七月 2017</a></li></ul>
+    </div>
+  </div>
+
+
+  
+    
+  <div class="widget-wrap">
+    <h3 class="widget-title">最新文章</h3>
+    <div class="widget">
+      <ul>
+        
+          <li>
+            <a href="/2018/05/09/Redis源码剖析-字符串t-string实现/">Redis源码剖析--字符串t_string实现</a>
+          </li>
+        
+          <li>
+            <a href="/2018/02/12/tornado-websocket实现二维码扫描/">tornado websocket实现二维码扫描</a>
+          </li>
+        
+          <li>
+            <a href="/2018/02/12/tornado之WebSocket/">tornado之WebSocket</a>
+          </li>
+        
+          <li>
+            <a href="/2017/09/12/Redis源码剖析-字符串对象/">Redis源码剖析--字符串对象</a>
+          </li>
+        
+          <li>
+            <a href="/2017/09/07/Redis源码剖析-对象Object/">Redis源码剖析--对象Object</a>
+          </li>
+        
+      </ul>
+    </div>
+  </div>
+
+  
+</aside>
+        
+      </div>
+      <footer id="footer">
+  
+  <div class="outer">
+    <div id="footer-info" class="inner">
+      &copy; 2018 Harley Liu<br>
+      Powered by <a href="http://hexo.io/" target="_blank">Hexo</a>
+    </div>
+  </div>
+</footer>
+    </div>
+    <nav id="mobile-nav">
+  
+    <a href="/" class="mobile-nav-link">Home</a>
+  
+    <a href="/archives" class="mobile-nav-link">Archives</a>
+  
+</nav>
+    
+
+<script src="//ajax.googleapis.com/ajax/libs/jquery/2.0.3/jquery.min.js"></script>
+
+
+  <link rel="stylesheet" href="/fancybox/jquery.fancybox.css">
+  <script src="/fancybox/jquery.fancybox.pack.js"></script>
+
+
+<script src="/js/script.js"></script>
+
+  </div>
+</body>
+</html>
