@@ -61,6 +61,158 @@
       <div class="outer">
         <section id="main">
   
+    <article id="post-Redis源码剖析-列表t-list实现" class="article article-type-post" itemscope itemprop="blogPost">
+  <div class="article-meta">
+    <a href="/2018/05/10/Redis源码剖析-列表t-list实现/" class="article-date">
+  <time datetime="2018-05-10T01:53:08.000Z" itemprop="datePublished">2018-05-10</time>
+</a>
+    
+  </div>
+  <div class="article-inner">
+    
+    
+      <header class="article-header">
+        
+  
+    <h1 itemprop="name">
+      <a class="article-title" href="/2018/05/10/Redis源码剖析-列表t-list实现/">Redis源码剖析--列表t_list实现</a>
+    </h1>
+  
+
+      </header>
+    
+    <div class="article-entry" itemprop="articleBody">
+      
+        <p>Redis中的列表对象比较特殊，在版本3.2之前，列表底层的编码是 ziplist 和 linkedlist 实现的， 但是在版本3.2之后，重新引入了一个 quicklist 的数据结构，列表的底层都由quicklist实现。</p>
+<p>这边是在看源码和实际验证的时候发现的区别，然后上网查证。由于目前使用的redis基本都在3.2了， 而且老版本肯定会被取代， 所以我们只分析3.2版本之后的实现。对于老版本的列表实现，一笔带过吧。 </p>
+<p>在老版本中，当列表对象可以同时满足以下两个条件时， 列表对象使用 ziplist 编码：</p>
+<ul>
+<li>列表对象保存的所有字符串元素的长度都小于 64 字节；</li>
+<li>列表对象保存的元素数量小于 512 个；</li>
+</ul>
+<p>不能满足这两个条件的列表对象需要使用 linkedlist 编码。当这两个条件任何一个不满足的时候，就会有一个格式的转换。</p>
+<p>对于quicklist的结构，下节中在具体分析，先来看下list的实现。</p>
+<h2 id="List的结构"><a href="#List的结构" class="headerlink" title="List的结构"></a>List的结构</h2><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div></pre></td><td class="code"><pre><div class="line">/* Structure to hold list iteration abstraction. */</div><div class="line">typedef struct &#123;</div><div class="line">    robj *subject;</div><div class="line">    unsigned char encoding;</div><div class="line">    unsigned char direction; /* Iteration direction */</div><div class="line">    quicklistIter *iter;</div><div class="line">&#125; listTypeIterator;</div><div class="line"></div><div class="line">/* Structure for an entry while iterating over a list. */</div><div class="line">typedef struct &#123;</div><div class="line">    listTypeIterator *li;</div><div class="line">    quicklistEntry entry; /* Entry in quicklist */</div><div class="line">&#125; listTypeEntry;</div></pre></td></tr></table></figure>
+<p>List的结构其实就是定义了一个列表的头节点， 以及一个迭代器指针，指针中指定了编码格式和迭代方向。</p>
+<h2 id="List命令"><a href="#List命令" class="headerlink" title="List命令"></a>List命令</h2><table>
+<thead>
+<tr>
+<th>命令</th>
+<th>说明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>BLPOP key1 [key2 ] timeout</td>
+<td>移出并获取列表的第一个元素， 如果列表没有元素会阻塞列表直到等待超时或发现可弹出元素为止。</td>
+</tr>
+<tr>
+<td>BRPOP key1 [key2 ] timeout</td>
+<td>移出并获取列表的最后一个元素， 如果列表没有元素会阻塞列表直到等待超时或发现可弹出元素为止。</td>
+</tr>
+<tr>
+<td>BRPOPLPUSH source destination timeout</td>
+<td>从列表中弹出一个值，将弹出的元素插入到另外一个列表中并返回它；如但果列表没有元素会阻塞列表直到等待超时或发现可弹出元素为止。</td>
+</tr>
+<tr>
+<td>LINDEX key index</td>
+<td>通过索引获取列表中的元素</td>
+</tr>
+<tr>
+<td>LINSERT key BEFORE</td>
+<td>AFTER pivot value</td>
+<td>在列表的元素前或者后插入元素</td>
+</tr>
+<tr>
+<td>LLEN key</td>
+<td>获取列表长度</td>
+</tr>
+<tr>
+<td>LPOP key</td>
+<td>移出并获取列表的第一个元素</td>
+</tr>
+<tr>
+<td>LPUSH key value1 [value2]</td>
+<td>将一个或多个值插入到列表头部</td>
+</tr>
+<tr>
+<td>LPUSHX key value</td>
+<td>将一个或多个值插入到已存在的列表头部</td>
+</tr>
+<tr>
+<td>LRANGE key start stop</td>
+<td>获取列表指定范围内的元素</td>
+</tr>
+<tr>
+<td>LREM key count value</td>
+<td>移除列表元素</td>
+</tr>
+<tr>
+<td>LSET key index value</td>
+<td>通过索引设置列表元素的值</td>
+</tr>
+<tr>
+<td>LTRIM key start stop</td>
+<td>对一个列表进行修剪(trim)，就是说，让列表只保留指定区间内的元素，不在指定区间之内的元素都将被删除。</td>
+</tr>
+<tr>
+<td>RPOP key</td>
+<td>移除并获取列表最后一个元素</td>
+</tr>
+<tr>
+<td>RPOPLPUSH source destination</td>
+<td>移除列表的最后一个元素，并将该元素添加到另一个列表并返回</td>
+</tr>
+<tr>
+<td>RPUSH key value1 [value2]</td>
+<td>在列表中添加一个或多个值</td>
+</tr>
+<tr>
+<td>RPUSHX key value</td>
+<td>为已存在的列表添加值</td>
+</tr>
+</tbody>
+</table>
+<h2 id="List命令实现"><a href="#List命令实现" class="headerlink" title="List命令实现"></a>List命令实现</h2><h3 id="push命令实现"><a href="#push命令实现" class="headerlink" title="push命令实现"></a>push命令实现</h3><p>lpush和rpush分别调用的下边的两个函数：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div></pre></td><td class="code"><pre><div class="line">// lpush操作</div><div class="line">void lpushCommand(client *c) &#123;</div><div class="line">    pushGenericCommand(c,LIST_HEAD);</div><div class="line">&#125;</div><div class="line"></div><div class="line">// rpush操作</div><div class="line">void rpushCommand(client *c) &#123;</div><div class="line">    pushGenericCommand(c,LIST_TAIL);</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>可以看到， 这两个操作其实都是调用的pushGenericCommand这个函数实现， 不同的点是指定了是从HEAD的位置push一个数据还是从TAIL的位置push一个数据。接下来来看pushGenericCommand的实现。</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div><div class="line">36</div><div class="line">37</div></pre></td><td class="code"><pre><div class="line">void pushGenericCommand(client *c, int where) &#123;</div><div class="line">    int j, pushed = 0;</div><div class="line">    // 现在数据库中查找是否已经存在了该键</div><div class="line">    robj *lobj = lookupKeyWrite(c-&gt;db,c-&gt;argv[1]);</div><div class="line">    // 如果已经存在了该键，验证该键是否是list类型，如果不是的话，返回错误</div><div class="line">    if (lobj &amp;&amp; lobj-&gt;type != OBJ_LIST) &#123;</div><div class="line">        addReply(c,shared.wrongtypeerr);</div><div class="line">        return;</div><div class="line">    &#125;</div><div class="line">    // 遍历剩余的参数</div><div class="line">    for (j = 2; j &lt; c-&gt;argc; j++) &#123;</div><div class="line">        // 如果该键不存在，创建一个quicklist</div><div class="line">        if (!lobj) &#123;</div><div class="line">            lobj = createQuicklistObject();</div><div class="line">            quicklistSetOptions(lobj-&gt;ptr, server.list_max_ziplist_size,</div><div class="line">                                server.list_compress_depth);</div><div class="line">            // 将创建的键添加到对应的db</div><div class="line">            dbAdd(c-&gt;db,c-&gt;argv[1],lobj);</div><div class="line">        &#125;</div><div class="line">        // 执行push操作</div><div class="line">        listTypePush(lobj,c-&gt;argv[j],where);</div><div class="line">        // 个数加1</div><div class="line">        pushed++;</div><div class="line">    &#125;</div><div class="line">    // 返回添加的节点数量</div><div class="line">    addReplyLongLong(c, (lobj ? listTypeLength(lobj) : 0));</div><div class="line">    // 至少有一个添加成功则进行操作</div><div class="line">    if (pushed) &#123;</div><div class="line">        char *event = (where == LIST_HEAD) ? &quot;lpush&quot; : &quot;rpush&quot;;</div><div class="line">        // 发送键修改信号</div><div class="line">        signalModifiedKey(c-&gt;db,c-&gt;argv[1]);</div><div class="line">        // 发送事件通知</div><div class="line">        notifyKeyspaceEvent(NOTIFY_LIST,event,c-&gt;argv[1],c-&gt;db-&gt;id);</div><div class="line">    &#125;</div><div class="line">    // 服务器的脏数据个数增加</div><div class="line">    server.dirty += pushed;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>内部最终还是调用了一个listTypePush的函数：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div></pre></td><td class="code"><pre><div class="line">/* The function pushes an element to the specified list object &apos;subject&apos;,</div><div class="line"> * at head or tail position as specified by &apos;where&apos;.</div><div class="line"> *</div><div class="line"> * There is no need for the caller to increment the refcount of &apos;value&apos; as</div><div class="line"> * the function takes care of it if needed. */</div><div class="line">void listTypePush(robj *subject, robj *value, int where) &#123;</div><div class="line">    // 判断类型是否为quciklist，不是的话返回错误</div><div class="line">    if (subject-&gt;encoding == OBJ_ENCODING_QUICKLIST) &#123;</div><div class="line">        int pos = (where == LIST_HEAD) ? QUICKLIST_HEAD : QUICKLIST_TAIL;</div><div class="line">        // 解码数据</div><div class="line">        value = getDecodedObject(value);</div><div class="line">        // 得到数据的长度</div><div class="line">        size_t len = sdslen(value-&gt;ptr);</div><div class="line">        // 调用quicklistPush插入数据</div><div class="line">        quicklistPush(subject-&gt;ptr, value-&gt;ptr, len, pos);</div><div class="line">        // 将数据项对象的引用次数减1，也就是释放value</div><div class="line">        decrRefCount(value);</div><div class="line">    &#125; else &#123;</div><div class="line">        serverPanic(&quot;Unknown list encoding&quot;);</div><div class="line">    &#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>pop的操作其实跟push的操作很相似，比较容易读懂。List的操作比较有特点的一项是阻塞操作，可以来分析一下。</p>
+<h3 id="阻塞pop操作的实现"><a href="#阻塞pop操作的实现" class="headerlink" title="阻塞pop操作的实现"></a>阻塞pop操作的实现</h3><p>首先，一样是调用了最上层的两个函数：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div></pre></td><td class="code"><pre><div class="line">// blpop</div><div class="line">void blpopCommand(client *c) &#123;</div><div class="line">    blockingPopGenericCommand(c,LIST_HEAD);</div><div class="line">&#125;</div><div class="line">// brpop</div><div class="line">void brpopCommand(client *c) &#123;</div><div class="line">    blockingPopGenericCommand(c,LIST_TAIL);</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>他们其实都是调用blockingPopGenericCommand来实现的。</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div><div class="line">36</div><div class="line">37</div><div class="line">38</div><div class="line">39</div><div class="line">40</div><div class="line">41</div><div class="line">42</div><div class="line">43</div><div class="line">44</div><div class="line">45</div><div class="line">46</div><div class="line">47</div><div class="line">48</div><div class="line">49</div><div class="line">50</div><div class="line">51</div><div class="line">52</div><div class="line">53</div><div class="line">54</div><div class="line">55</div><div class="line">56</div><div class="line">57</div><div class="line">58</div><div class="line">59</div><div class="line">60</div><div class="line">61</div><div class="line">62</div></pre></td><td class="code"><pre><div class="line">/* Blocking RPOP/LPOP */</div><div class="line">void blockingPopGenericCommand(client *c, int where) &#123;</div><div class="line">    robj *o;</div><div class="line">    mstime_t timeout;</div><div class="line">    int j;</div><div class="line"></div><div class="line">    // 取出timeout参数</div><div class="line">    if (getTimeoutFromObjectOrReply(c,c-&gt;argv[c-&gt;argc-1],&amp;timeout,UNIT_SECONDS)</div><div class="line">        != C_OK) return;</div><div class="line">    // 遍历参数</div><div class="line">    for (j = 1; j &lt; c-&gt;argc-1; j++) &#123;</div><div class="line">        // 查看数据库中是否存在该键</div><div class="line">        o = lookupKeyWrite(c-&gt;db,c-&gt;argv[j]);</div><div class="line">        if (o != NULL) &#123;</div><div class="line">            // 如果存在，判断该键是否是list类型，不是的话报错</div><div class="line">            if (o-&gt;type != OBJ_LIST) &#123;</div><div class="line">                addReply(c,shared.wrongtypeerr);</div><div class="line">                return;</div><div class="line">            &#125; else &#123;</div><div class="line">                // 当前列表非空，直接执行pop操作</div><div class="line">                if (listTypeLength(o) != 0) &#123;</div><div class="line">                    /* Non empty list, this is like a non normal [LR]POP. */</div><div class="line">                    char *event = (where == LIST_HEAD) ? &quot;lpop&quot; : &quot;rpop&quot;;</div><div class="line">                    robj *value = listTypePop(o,where);</div><div class="line">                    serverAssert(value != NULL);</div><div class="line"></div><div class="line">                    addReplyMultiBulkLen(c,2);</div><div class="line">                    addReplyBulk(c,c-&gt;argv[j]);</div><div class="line">                    addReplyBulk(c,value);</div><div class="line">                    decrRefCount(value);</div><div class="line">                    notifyKeyspaceEvent(NOTIFY_LIST,event,</div><div class="line">                                        c-&gt;argv[j],c-&gt;db-&gt;id);</div><div class="line">                    // 如果当前key弹出一个值之后为空，删除这个列表</div><div class="line">                    if (listTypeLength(o) == 0) &#123;</div><div class="line">                        dbDelete(c-&gt;db,c-&gt;argv[j]);</div><div class="line">                        notifyKeyspaceEvent(NOTIFY_GENERIC,&quot;del&quot;,</div><div class="line">                                            c-&gt;argv[j],c-&gt;db-&gt;id);</div><div class="line">                    &#125;</div><div class="line">                    signalModifiedKey(c-&gt;db,c-&gt;argv[j]);</div><div class="line">                    server.dirty++;</div><div class="line"></div><div class="line">                    /* Replicate it as an [LR]POP instead of B[LR]POP. */</div><div class="line">                    rewriteClientCommandVector(c,2,</div><div class="line">                        (where == LIST_HEAD) ? shared.lpop : shared.rpop,</div><div class="line">                        c-&gt;argv[j]);</div><div class="line">                    return;</div><div class="line">                &#125;</div><div class="line">            &#125;</div><div class="line">        &#125;</div><div class="line">    &#125;</div><div class="line"></div><div class="line">    /* If we are inside a MULTI/EXEC and the list is empty the only thing</div><div class="line">     * we can do is treating it as a timeout (even with timeout 0). */</div><div class="line">    if (c-&gt;flags &amp; CLIENT_MULTI) &#123;</div><div class="line">        addReply(c,shared.nullmultibulk);</div><div class="line">        return;</div><div class="line">    &#125;</div><div class="line"></div><div class="line">    /* If the list is empty or the key does not exists we must block */</div><div class="line">    // 参数中的所有键都不存在，则阻塞这些键</div><div class="line">    blockForKeys(c, c-&gt;argv + 1, c-&gt;argc - 2, timeout, NULL);</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>可以看到， 当指定的list存在于当前数据库中且list不为空，就会执行一次普通的pop操作；但是当指定的list键不存在，或者该list为空，就会阻塞该操作。就是上边代码中的最后一句。</p>
+<p>接下去，就是看redis如何处理这个被阻塞的操作。</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div><div class="line">36</div><div class="line">37</div><div class="line">38</div><div class="line">39</div><div class="line">40</div><div class="line">41</div><div class="line">42</div><div class="line">43</div><div class="line">44</div><div class="line">45</div><div class="line">46</div></pre></td><td class="code"><pre><div class="line">/* Set a client in blocking mode for the specified key, with the specified</div><div class="line"> * timeout */</div><div class="line"> // 设置键的阻塞状态</div><div class="line">void blockForKeys(client *c, robj **keys, int numkeys, mstime_t timeout, robj *target) &#123;</div><div class="line">    dictEntry *de;</div><div class="line">    list *l;</div><div class="line">    int j;</div><div class="line"></div><div class="line">    c-&gt;bpop.timeout = timeout;</div><div class="line">    c-&gt;bpop.target = target;</div><div class="line"></div><div class="line">    if (target != NULL) incrRefCount(target);</div><div class="line"></div><div class="line">    // 遍历所有的key</div><div class="line">    for (j = 0; j &lt; numkeys; j++) &#123;</div><div class="line">        /* If the key already exists in the dict ignore it. */</div><div class="line">        // 如果当前键存在，则忽略；反之则添加该键</div><div class="line">        // bpop.keys记录所有造成客户端阻塞的键</div><div class="line">        if (dictAdd(c-&gt;bpop.keys,keys[j],NULL) != DICT_OK) continue;</div><div class="line">        //当前的key引用计数加1</div><div class="line">        incrRefCount(keys[j]);</div><div class="line"></div><div class="line">        /* And in the other &quot;side&quot;, to map keys -&gt; clients */</div><div class="line">        // blocking_keys是一个字典，其键为造成阻塞的键，值是一个链表，记录所有被该键阻塞的客户端</div><div class="line">        // 查找当前造成阻塞的键</div><div class="line">        de = dictFind(c-&gt;db-&gt;blocking_keys,keys[j]);</div><div class="line">        if (de == NULL) &#123;</div><div class="line">            // 如果不存在，需要新创建一个， 并加入到blocking_keys中</div><div class="line">            int retval;</div><div class="line"></div><div class="line">            /* For every key we take a list of clients blocked for it */</div><div class="line">            l = listCreate();</div><div class="line">            // 将键和新创建的列表加入</div><div class="line">            retval = dictAdd(c-&gt;db-&gt;blocking_keys,keys[j],l);</div><div class="line">            incrRefCount(keys[j]);</div><div class="line">            serverAssertWithInfo(c,keys[j],retval == DICT_OK);</div><div class="line">        &#125; else &#123;</div><div class="line">            // 如果存在，获取该键的值，即客户端列表</div><div class="line">            l = dictGetVal(de);</div><div class="line">        &#125;</div><div class="line">        // 将当前的客户端加入的该键的阻塞列表中</div><div class="line">        listAddNodeTail(l,c);</div><div class="line">    &#125;</div><div class="line">    // 阻塞该客户端</div><div class="line">    blockClient(c,BLOCKED_LIST);</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>从上边的代码中，可以看到客户端分别用来c-&gt;bpop.xxxx 和 c-&gt;db-&gt;blocking_keys用来保存被阻塞的键，以及阻塞的键和客户端的对应关系。</p>
+<p>他们的定义如下：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div></pre></td><td class="code"><pre><div class="line">// server.h</div><div class="line">typedef struct client &#123;</div><div class="line">    //client当前使用的数据库</div><div class="line">    redisDb *db;   /* Pointer to currently SELECTed DB. */</div><div class="line"></div><div class="line">    //阻塞状态</div><div class="line">    blockingState bpop;     /* blocking state */</div><div class="line">    //其他成员省略</div><div class="line">&#125; client;</div><div class="line"></div><div class="line">// 阻塞状态结构体</div><div class="line">typedef struct blockingState &#123;</div><div class="line">    mstime_t timeout;      // 阻塞超时时间</div><div class="line">    dict *keys;           // 记录所有造成客户端阻塞的键</div><div class="line">    robj *target;         // 目标选项，target在执行RPOPLPUSH命令时使用，</div><div class="line">    /* BLOCKED_WAIT */</div><div class="line">    int numreplicas;        /* Number of replicas we are waiting for ACK. */</div><div class="line">    long long reploffset;   /* Replication offset to reach. */</div><div class="line">&#125; blockingState;</div><div class="line">typedef struct redisDb &#123;</div><div class="line">    dict *blocking_keys;        // 记录所有造成阻塞的键，及其相应的客户端</div><div class="line">    // ...其他参数省略</div><div class="line">&#125; redisDb;</div><div class="line"></div><div class="line">typedef struct redisDb &#123;</div><div class="line">    //正处于阻塞状态的键</div><div class="line">    dict *blocking_keys;        /* Keys with clients waiting for data (BLPOP) */</div><div class="line">    //可以解除阻塞的键</div><div class="line">    dict *ready_keys;           /* Blocked keys that received a PUSH */</div><div class="line">&#125; redisDb;</div></pre></td></tr></table></figure>
+<p>redisDb里边利用了一个名为blocking_keys的dict来存储每个阻塞的键，以及等待该键的客户端的对应关系。</p>
+<p>做完这些之后，这个客户端就被阻塞了。 那么这个客户端如何从阻塞状态重新回复到非阻塞状态呢。 一个当时是等待的时间超过了timeout的时间，从阻塞状态恢复； 另一个则是其他的客户端往这个列表中插入了数据，正好是当前阻塞的客户端所需要的，当前客户端收到信号之后，从阻塞状态中恢复。</p>
+<p>根据我的理解， 如果是客户端超时被解阻塞，调用的是这个函数：</p>
+<h4 id="超时解阻塞"><a href="#超时解阻塞" class="headerlink" title="超时解阻塞"></a>超时解阻塞</h4><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div><div class="line">36</div></pre></td><td class="code"><pre><div class="line">//解阻塞一个正在阻塞中的client</div><div class="line">void unblockClientWaitingData(client *c) &#123;</div><div class="line">    dictEntry *de;</div><div class="line">    dictIterator *di;</div><div class="line">    list *l;</div><div class="line"></div><div class="line">    serverAssertWithInfo(c,NULL,dictSize(c-&gt;bpop.keys) != 0);</div><div class="line">    //创建一个字典的迭代器，指向的是造成client阻塞的键所组成的字典</div><div class="line">    di = dictGetIterator(c-&gt;bpop.keys);</div><div class="line">    /* The client may wait for multiple keys, so unblock it for every key. */</div><div class="line">    //因为client可能被多个key所阻塞，所以要遍历所有的键</div><div class="line">    while((de = dictNext(di)) != NULL) &#123;</div><div class="line">        robj *key = dictGetKey(de); //获得key对象</div><div class="line"></div><div class="line">        /* Remove this client from the list of clients waiting for this key. */</div><div class="line">        //根据key找到对应的列表类型值，值保存着被阻塞的client，从中找c-&gt;db-&gt;blocking_keys中寻找</div><div class="line">        l = dictFetchValue(c-&gt;db-&gt;blocking_keys,key);</div><div class="line">        serverAssertWithInfo(c,key,l != NULL);</div><div class="line">        // 将阻塞的client从列表中移除</div><div class="line">        listDelNode(l,listSearchKey(l,c));</div><div class="line">        /* If the list is empty we need to remove it to avoid wasting memory */</div><div class="line">        //如果当前列表为空了，则从c-&gt;db-&gt;blocking_keys中将key删除</div><div class="line">        if (listLength(l) == 0)</div><div class="line">            dictDelete(c-&gt;db-&gt;blocking_keys,key);</div><div class="line">    &#125;</div><div class="line">    dictReleaseIterator(di);    //释放迭代器</div><div class="line"></div><div class="line">    /* Cleanup the client structure */</div><div class="line">    //清空bpop.keys的所有节点</div><div class="line">    dictEmpty(c-&gt;bpop.keys,NULL);</div><div class="line">    //如果保存有新添加的元素，则应该释放</div><div class="line">    if (c-&gt;bpop.target) &#123;</div><div class="line">        decrRefCount(c-&gt;bpop.target);</div><div class="line">        c-&gt;bpop.target = NULL;</div><div class="line">    &#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>如果是其他的客户端插入了一个数据，则是调用下边的函数：</p>
+<h4 id="插入解阻塞"><a href="#插入解阻塞" class="headerlink" title="插入解阻塞"></a>插入解阻塞</h4><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div></pre></td><td class="code"><pre><div class="line">// 如果客户端因为等待某个 key 被阻塞，那么将此key加入到server.ready_keys中</div><div class="line">// 这个列表最终会被 handleClientsBlockedOnLists() 函数处理。</div><div class="line">void signalListAsReady(redisDb *db, robj *key) &#123;</div><div class="line">    readyList *rl;</div><div class="line">    // 如果在所有造成客户端阻塞的键中找不到此键，则不作处理</div><div class="line">    if (dictFind(db-&gt;blocking_keys,key) == NULL) return;</div><div class="line">    // 这个键已经存在于ready_keys中了，则不作处理</div><div class="line">    if (dictFind(db-&gt;ready_keys,key) != NULL) return;</div><div class="line">    </div><div class="line">    // 创建一个新的readylists结构，保存键和数据库</div><div class="line">    // 然后将该结构添加到server.ready_keys中</div><div class="line">    rl = zmalloc(sizeof(*rl));</div><div class="line">    rl-&gt;key = key;</div><div class="line">    rl-&gt;db = db;</div><div class="line">    // 该键的索引加1</div><div class="line">    incrRefCount(key);</div><div class="line">    listAddNodeTail(server.ready_keys,rl);</div><div class="line">    // 同样，将key添加到db-&gt;ready_keys中</div><div class="line">    incrRefCount(key);</div><div class="line">    serverAssert(dictAdd(db-&gt;ready_keys,key,NULL) == DICT_OK);</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>在将所有可用的key加入到ready_keys之后，会有统一的函数去检查哪些客户端等待着这些key，然后将他们解阻塞</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div><div class="line">36</div><div class="line">37</div><div class="line">38</div><div class="line">39</div><div class="line">40</div><div class="line">41</div><div class="line">42</div><div class="line">43</div><div class="line">44</div><div class="line">45</div><div class="line">46</div><div class="line">47</div><div class="line">48</div><div class="line">49</div><div class="line">50</div><div class="line">51</div><div class="line">52</div><div class="line">53</div><div class="line">54</div><div class="line">55</div><div class="line">56</div><div class="line">57</div><div class="line">58</div><div class="line">59</div><div class="line">60</div><div class="line">61</div><div class="line">62</div><div class="line">63</div><div class="line">64</div><div class="line">65</div><div class="line">66</div><div class="line">67</div><div class="line">68</div><div class="line">69</div><div class="line">70</div><div class="line">71</div><div class="line">72</div><div class="line">73</div><div class="line">74</div><div class="line">75</div><div class="line">76</div><div class="line">77</div><div class="line">78</div><div class="line">79</div><div class="line">80</div><div class="line">81</div><div class="line">82</div><div class="line">83</div><div class="line">84</div><div class="line">85</div><div class="line">86</div><div class="line">87</div><div class="line">88</div><div class="line">89</div><div class="line">90</div><div class="line">91</div><div class="line">92</div></pre></td><td class="code"><pre><div class="line">/* 遍历server.ready_keys中所有已经准备好的key，同时在c-&gt;db-&gt;blocking_keys中</div><div class="line"> 遍历所有由此键造成阻塞的客户端，如果key不为空的话，就从key中弹出一个元素返回给客户端并解除该客户端的阻塞状态，直到server.ready_keys为空，或没有因该key而阻塞的客户端为止 */</div><div class="line">/* This function should be called by Redis every time a single command,</div><div class="line"> * a MULTI/EXEC block, or a Lua script, terminated its execution after</div><div class="line"> * being called by a client.</div><div class="line"> *</div><div class="line"> * All the keys with at least one client blocked that received at least</div><div class="line"> * one new element via some PUSH operation are accumulated into</div><div class="line"> * the server.ready_keys list. This function will run the list and will</div><div class="line"> * serve clients accordingly. Note that the function will iterate again and</div><div class="line"> * again as a result of serving BRPOPLPUSH we can have new blocking clients</div><div class="line"> * to serve because of the PUSH side of BRPOPLPUSH. */</div><div class="line">void handleClientsBlockedOnLists(void) &#123;</div><div class="line">    while(listLength(server.ready_keys) != 0) &#123;</div><div class="line">        list *l;</div><div class="line"></div><div class="line">        /* Point server.ready_keys to a fresh list and save the current one</div><div class="line">         * locally. This way as we run the old list we are free to call</div><div class="line">         * signalListAsReady() that may push new elements in server.ready_keys</div><div class="line">         * when handling clients blocked into BRPOPLPUSH. */</div><div class="line">        l = server.ready_keys;</div><div class="line">        server.ready_keys = listCreate();</div><div class="line"></div><div class="line">        while(listLength(l) != 0) &#123;</div><div class="line">            listNode *ln = listFirst(l);</div><div class="line">            readyList *rl = ln-&gt;value;</div><div class="line"></div><div class="line">            /* First of all remove this key from db-&gt;ready_keys so that</div><div class="line">             * we can safely call signalListAsReady() against this key. */</div><div class="line">            dictDelete(rl-&gt;db-&gt;ready_keys,rl-&gt;key);</div><div class="line"></div><div class="line">            /* If the key exists and it&apos;s a list, serve blocked clients</div><div class="line">             * with data. */</div><div class="line">            robj *o = lookupKeyWrite(rl-&gt;db,rl-&gt;key);</div><div class="line">            if (o != NULL &amp;&amp; o-&gt;type == OBJ_LIST) &#123;</div><div class="line">                dictEntry *de;</div><div class="line"></div><div class="line">                /* We serve clients in the same order they blocked for</div><div class="line">                 * this key, from the first blocked to the last. */</div><div class="line">                de = dictFind(rl-&gt;db-&gt;blocking_keys,rl-&gt;key);</div><div class="line">                if (de) &#123;</div><div class="line">                    list *clients = dictGetVal(de);</div><div class="line">                    int numclients = listLength(clients);</div><div class="line"></div><div class="line">                    while(numclients--) &#123;</div><div class="line">                        listNode *clientnode = listFirst(clients);</div><div class="line">                        client *receiver = clientnode-&gt;value;</div><div class="line">                        robj *dstkey = receiver-&gt;bpop.target;</div><div class="line">                        int where = (receiver-&gt;lastcmd &amp;&amp;</div><div class="line">                                     receiver-&gt;lastcmd-&gt;proc == blpopCommand) ?</div><div class="line">                                    LIST_HEAD : LIST_TAIL;</div><div class="line">                        robj *value = listTypePop(o,where);</div><div class="line"></div><div class="line">                        if (value) &#123;</div><div class="line">                            /* Protect receiver-&gt;bpop.target, that will be</div><div class="line">                             * freed by the next unblockClient()</div><div class="line">                             * call. */</div><div class="line">                            if (dstkey) incrRefCount(dstkey);</div><div class="line">                            unblockClient(receiver);</div><div class="line"></div><div class="line">                            if (serveClientBlockedOnList(receiver,</div><div class="line">                                rl-&gt;key,dstkey,rl-&gt;db,value,</div><div class="line">                                where) == C_ERR)</div><div class="line">                            &#123;</div><div class="line">                                /* If we failed serving the client we need</div><div class="line">                                 * to also undo the POP operation. */</div><div class="line">                                    listTypePush(o,value,where);</div><div class="line">                            &#125;</div><div class="line"></div><div class="line">                            if (dstkey) decrRefCount(dstkey);</div><div class="line">                            decrRefCount(value);</div><div class="line">                        &#125; else &#123;</div><div class="line">                            break;</div><div class="line">                        &#125;</div><div class="line">                    &#125;</div><div class="line">                &#125;</div><div class="line"></div><div class="line">                if (listTypeLength(o) == 0) &#123;</div><div class="line">                    dbDelete(rl-&gt;db,rl-&gt;key);</div><div class="line">                &#125;</div><div class="line">                /* We don&apos;t call signalModifiedKey() as it was already called</div><div class="line">                 * when an element was pushed on the list. */</div><div class="line">            &#125;</div><div class="line"></div><div class="line">            /* Free this item. */</div><div class="line">            decrRefCount(rl-&gt;key);</div><div class="line">            zfree(rl);</div><div class="line">            listDelNode(l,ln);</div><div class="line">        &#125;</div><div class="line">        listRelease(l); /* We have the new list on place at this point. */</div><div class="line">    &#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+      
+    </div>
+    <footer class="article-footer">
+      <a data-url="https://harleylau.github.io/2018/05/10/Redis源码剖析-列表t-list实现/" data-id="cjhr1rzbm0004v368lz4jtpey" class="article-share-link">Share</a>
+      
+      
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
+
+    </footer>
+  </div>
+  
+</article>
+
+
+  
     <article id="post-Redis源码剖析-字符串t-string实现" class="article article-type-post" itemscope itemprop="blogPost">
   <div class="article-meta">
     <a href="/2018/05/09/Redis源码剖析-字符串t-string实现/" class="article-date">
@@ -195,7 +347,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2018/05/09/Redis源码剖析-字符串t-string实现/" data-id="cjgzvfysx0001ts68e3mxlttx" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2018/05/09/Redis源码剖析-字符串t-string实现/" data-id="cjhr1rzbt0007v3682bzsz2pz" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
@@ -242,7 +394,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2018/02/12/tornado-websocket实现二维码扫描/" data-id="cjgzvfyu3000pts68u2mmqpvh" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2018/02/12/tornado-websocket实现二维码扫描/" data-id="cjhr1rzco000qv368yyd16xhx" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/tornado/">tornado</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/websocket/">websocket</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/二维码/">二维码</a></li></ul>
@@ -290,7 +442,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2018/02/12/tornado之WebSocket/" data-id="cjgzvfyv2001its68uvt1nf08" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2018/02/12/tornado之WebSocket/" data-id="cjhr1rzct000vv368ynu31gn8" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/tornado/">tornado</a></li></ul>
@@ -432,7 +584,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/09/12/Redis源码剖析-字符串对象/" data-id="cjgzvfytc0008ts68177fvxbi" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/09/12/Redis源码剖析-字符串对象/" data-id="cjhr1rzbw0008v36884y21zh2" class="article-share-link">Share</a>
       
       
     </footer>
@@ -589,7 +741,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/09/07/Redis源码剖析-对象Object/" data-id="cjgzvfyte0009ts68jb9fqwcr" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/09/07/Redis源码剖析-对象Object/" data-id="cjhr1rzc1000dv368dh1fqjn3" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
@@ -634,7 +786,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/09/07/tornado-打印block日志/" data-id="cjgzvfyuz001hts68nklzi1ta" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/09/07/tornado-打印block日志/" data-id="cjhr1rzcx000xv368qvyze87g" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/tornado/">tornado</a></li></ul>
@@ -775,7 +927,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/09/05/Redis源码剖析-压缩列表/" data-id="cjgzvfyt40004ts6868jki7xx" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/09/05/Redis源码剖析-压缩列表/" data-id="cjhr1rzbp0005v368p5xpljrj" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
@@ -835,7 +987,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/08/29/Redis源码剖析-整数集合/" data-id="cjgzvfytn000fts687r007z79" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/08/29/Redis源码剖析-整数集合/" data-id="cjhr1rzc6000gv368ah3nx0kp" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
@@ -903,74 +1055,7 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/08/24/Redis源码剖析-跳跃表/" data-id="cjgzvfytk000cts68h1hxdk5k" class="article-share-link">Share</a>
-      
-      
-  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
-
-    </footer>
-  </div>
-  
-</article>
-
-
-  
-    <article id="post-Redis源码剖析-dict遍历算法" class="article article-type-post" itemscope itemprop="blogPost">
-  <div class="article-meta">
-    <a href="/2017/08/02/Redis源码剖析-dict遍历算法/" class="article-date">
-  <time datetime="2017-08-02T08:08:16.000Z" itemprop="datePublished">2017-08-02</time>
-</a>
-    
-  </div>
-  <div class="article-inner">
-    
-    
-      <header class="article-header">
-        
-  
-    <h1 itemprop="name">
-      <a class="article-title" href="/2017/08/02/Redis源码剖析-dict遍历算法/">Redis源码剖析-dict遍历算法</a>
-    </h1>
-  
-
-      </header>
-    
-    <div class="article-entry" itemprop="articleBody">
-      
-        <p>先贴一下整体的代码</p>
-<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div><div class="line">32</div><div class="line">33</div><div class="line">34</div><div class="line">35</div><div class="line">36</div><div class="line">37</div><div class="line">38</div><div class="line">39</div><div class="line">40</div><div class="line">41</div><div class="line">42</div><div class="line">43</div><div class="line">44</div><div class="line">45</div><div class="line">46</div><div class="line">47</div><div class="line">48</div><div class="line">49</div><div class="line">50</div><div class="line">51</div><div class="line">52</div><div class="line">53</div><div class="line">54</div><div class="line">55</div><div class="line">56</div><div class="line">57</div><div class="line">58</div><div class="line">59</div><div class="line">60</div><div class="line">61</div><div class="line">62</div><div class="line">63</div><div class="line">64</div><div class="line">65</div><div class="line">66</div><div class="line">67</div><div class="line">68</div><div class="line">69</div><div class="line">70</div><div class="line">71</div><div class="line">72</div><div class="line">73</div><div class="line">74</div><div class="line">75</div><div class="line">76</div><div class="line">77</div><div class="line">78</div><div class="line">79</div><div class="line">80</div></pre></td><td class="code"><pre><div class="line">unsigned long dictScan(dict *d,</div><div class="line">                       unsigned long v,</div><div class="line">                       dictScanFunction *fn,</div><div class="line">                       dictScanBucketFunction* bucketfn,</div><div class="line">                       void *privdata)</div><div class="line">&#123;</div><div class="line">    dictht *t0, *t1;</div><div class="line">    const dictEntry *de, *next;</div><div class="line">    unsigned long m0, m1;</div><div class="line"></div><div class="line">    // 跳过空字典</div><div class="line">    if (dictSize(d) == 0) return 0;</div><div class="line"></div><div class="line">    // 如果没有rehash，迭代一个哈希表的字典</div><div class="line">    if (!dictIsRehashing(d)) &#123;</div><div class="line">        t0 = &amp;(d-&gt;ht[0]);</div><div class="line">        m0 = t0-&gt;sizemask;</div><div class="line"></div><div class="line">        /* Emit entries at cursor */</div><div class="line">        if (bucketfn) bucketfn(privdata, &amp;t0-&gt;table[v &amp; m0]);</div><div class="line">        de = t0-&gt;table[v &amp; m0];</div><div class="line">        while (de) &#123;</div><div class="line">            next = de-&gt;next;</div><div class="line">            fn(privdata, de);</div><div class="line">            de = next;</div><div class="line">        &#125;</div><div class="line">    // 迭代有两个哈希表的字典</div><div class="line">    &#125; else &#123;</div><div class="line">        t0 = &amp;d-&gt;ht[0];</div><div class="line">        t1 = &amp;d-&gt;ht[1];</div><div class="line"></div><div class="line">        /* Make sure t0 is the smaller and t1 is the bigger table */</div><div class="line">        // 确保 t0 比 t1 要小</div><div class="line">        if (t0-&gt;size &gt; t1-&gt;size) &#123;</div><div class="line">            t0 = &amp;d-&gt;ht[1];</div><div class="line">            t1 = &amp;d-&gt;ht[0];</div><div class="line">        &#125;</div><div class="line"></div><div class="line">        m0 = t0-&gt;sizemask;</div><div class="line">        m1 = t1-&gt;sizemask;</div><div class="line"></div><div class="line">        /* Emit entries at cursor */</div><div class="line">        if (bucketfn) bucketfn(privdata, &amp;t0-&gt;table[v &amp; m0]);</div><div class="line">        de = t0-&gt;table[v &amp; m0];</div><div class="line">        while (de) &#123;</div><div class="line">            next = de-&gt;next;</div><div class="line">            fn(privdata, de);</div><div class="line">            de = next;</div><div class="line">        &#125;</div><div class="line"></div><div class="line">        /* Iterate over indices in larger table that are the expansion</div><div class="line">         * of the index pointed to by the cursor in the smaller table */</div><div class="line">        do &#123;</div><div class="line">            /* Emit entries at cursor */</div><div class="line">            if (bucketfn) bucketfn(privdata, &amp;t1-&gt;table[v &amp; m1]);</div><div class="line">            de = t1-&gt;table[v &amp; m1];</div><div class="line">            while (de) &#123;</div><div class="line">                next = de-&gt;next;</div><div class="line">                fn(privdata, de);</div><div class="line">                de = next;</div><div class="line">            &#125;</div><div class="line"></div><div class="line">            /* Increment bits not covered by the smaller mask */</div><div class="line">            v = (((v | m0) + 1) &amp; ~m0) | (v &amp; m0);</div><div class="line"></div><div class="line">            /* Continue while bits covered by mask difference is non-zero */</div><div class="line">        &#125; while (v &amp; (m0 ^ m1));</div><div class="line">    &#125;</div><div class="line"></div><div class="line">    /* Set unmasked bits so incrementing the reversed cursor</div><div class="line">     * operates on the masked bits of the smaller table */</div><div class="line">    v |= ~m0;</div><div class="line"></div><div class="line">    /* Increment the reverse cursor */</div><div class="line">    v = rev(v);</div><div class="line">    v++;</div><div class="line">    v = rev(v);</div><div class="line"></div><div class="line">    return v;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
-<p>Redis的dict结构中，有一个遍历dict的函数，因为该遍历函数的算法比较特别，值得单独拿出来研究一下。</p>
-<p>首先考虑最简单的情况， 如果一个dict是稳定，即没有扩大缩小，也没有正好处于rehash的过程中，那么这种情况下的遍历是最简单的， 只需要按照索引值顺序遍历第一个hash表ht[0]就行。 </p>
-<p>但是如果本次索引的遍历的时候，跟上一个索引遍历的时候，dict已经经过了扩大或者缩小，或者dict正好处于rehash的过程中的时候，遍历过程就变复杂了。</p>
-<p>如果仍旧采用顺序遍历索引的策略，考虑dict经过缩小的情况。如果hash表一共有8个slot，经过扩大变成了4个slot，在计算索引的时候，都是hash值同mask=size-1做与操作。所以如果某个key的hash值最后原来是7的话，在slot=8的时候，应该放到索引为7的slot，但是缩小到4个slot的时候，将被放在slot=3。可以想见，这种情况下，会有大量的key被漏掉。同样，如果经过了扩大，也会有大量的key被重复遍历。</p>
-<h2 id="dict的反向二进制位遍历"><a href="#dict的反向二进制位遍历" class="headerlink" title="dict的反向二进制位遍历"></a>dict的反向二进制位遍历</h2><p>Redis的遍历方式采用了反向的二进制位遍历。那么什么是反向二进制位遍历呢。按照正常的遍历逻辑，遍历的顺序是按照0-&gt;1-&gt;2-&gt;3-&gt;4….</p>
-<p>但是dictScan采用的顺序，以8个slot为例，是0-&gt;4-&gt;2-&gt;6-&gt;1-&gt;5-&gt;3-&gt;7。看着貌似没有规律，但是其实是从高位开始，向低位进位的一种遍历方式，用二进制更能直观的看出来</p>
- <figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div></pre></td><td class="code"><pre><div class="line">000 --&gt; 100 --&gt; 010 --&gt; 110 --&gt; 001 --&gt; 101 --&gt; 011 --&gt; 111 --&gt; 000</div></pre></td></tr></table></figure>
-<p> 那么用这种方式遍历会有什么好处呢，可以按照dict不同状态的示例来说明</p>
-<h3 id="1、当dict稳定的时候"><a href="#1、当dict稳定的时候" class="headerlink" title="1、当dict稳定的时候"></a>1、当dict稳定的时候</h3><p>这种情况下，从上面的说明能看出，反向二进制遍历同正向二进制遍历一样，能够遍历到所有的索引，并且不会有重复或遗漏</p>
-<h3 id="2、当dict扩大的时候"><a href="#2、当dict扩大的时候" class="headerlink" title="2、当dict扩大的时候"></a>2、当dict扩大的时候</h3><p>假设dict的slot由8个扩大到16个，首先列出两种状态下的遍历顺序：</p>
-<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div></pre></td><td class="code"><pre><div class="line">000 --&gt; 100 --&gt; 010 --&gt; 110 --&gt; 001 --&gt; 101 --&gt; 011 --&gt; 111 --&gt; 000     </div><div class="line">  </div><div class="line">0000 --&gt; 1000 --&gt; 0100 --&gt; 1100 --&gt; 0010 --&gt; 1010 --&gt; 0110 --&gt; 1110 --&gt; 0001 --&gt; 1001 --&gt; 0101 --&gt; 1101 --&gt; 0011 --&gt; 1011 --&gt; 0111 --&gt; 1111 --&gt; 0000</div></pre></td></tr></table></figure>
-<p>假设在slot=8的时候已经遍历完了010的索引，下一次就需要遍历110的索引。此时dict发生了rehash操作，slot从8个扩展到了16个，</p>
-<p>在slot=16的情况下，就需要遍历0110的索引。 此时，在slot=8的时候遍历过的所以值为000，100，010，对应到slot=16的情况下，分别是0000，1000， 0100，1100， 0010， 1010， 正好是所以址0110的前序所以， 这样的话，整个遍历流程，不会造成遍历的重复或者遗漏。</p>
-<h3 id="3、当dict缩小的时候"><a href="#3、当dict缩小的时候" class="headerlink" title="3、当dict缩小的时候"></a>3、当dict缩小的时候</h3><p>假设在slot=16的是，已经遍历完了0110的索引，下一个就要遍历1110的索引，此时dict缩小到了slot=8 。此前已经遍历过的所有索引分别为 0000， 1000， 0100， 1100， 0010， 1010， 0110， 对应到slot=8的情况下，分别落到索引000，100，010，110。 </p>
-<p>此时需要从110的所以开始遍历，但是由于此前在slot=16的时候已经遍历过的0110的索引值也是落到110的索引，所以会造成一部分的key被重复遍历。</p>
-<p>原哈希表长度为x，缩小后长度为y，则最多会有x/y – 1个原bucket的节点会被重复迭代。比如由16缩小为8，则最多就有1个bucket节点会重复迭代，要是由32缩小为8，则最多会有3个。</p>
-<p>但是，也有可能，正好不重复遍历，比如slot=16的时候遍历到1010，即将遍历0110的时候dict缩小的时候，就不会产生重复。</p>
-<p>反向二进制算法保证了dict不会遗漏元素，同时在dict缩小的时候，保证了比较小的元素重复。</p>
-<h3 id="4、正好进行rehash的时候"><a href="#4、正好进行rehash的时候" class="headerlink" title="4、正好进行rehash的时候"></a>4、正好进行rehash的时候</h3><p>当dict正好在进行rehash的时候，当前遍历的索引里边可能数据不全，因为有一部分已经rehash到新表中去了。所以为了不漏掉元素，采取的措施是同时遍历两个hash表的对应索引。</p>
-<p>但是rehash的过程中，不管扩大还是缩小，两张表的索引都是不同的，如何对应呢。 方法就是先比较两张hash表的大小，先遍历较小的hash表，遍历完之后，找到大表中所有对应的索引值，全部依次遍历。</p>
-<p>举个例子，暂且不管dict当前是在扩大还是缩小，两张hash表的大小肯定是不同的。假设一张表的slot=8，另一张表的slot=32， 两个mask分别为111和11111。 假设当前的hash值同111做与操作之后为010，那么小表中010的索引遍历之后，需要遍历大表的00010，01010， 10010和11010的索引，然后将两者的索引一块返回。</p>
-<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div></pre></td><td class="code"><pre><div class="line">v = (((v | m0) + 1) &amp; ~m0) | (v &amp; m0);</div></pre></td></tr></table></figure>
-<p>那么如何保证大表对应的所有索引都能遍历到呢。代码中可以看到这么一条语句，分析一下。 v | m0 将v的低位全部置为1， (v | m0) + 1则是将v的高位加1，之后再 &amp; ~m0 将所有低位置0， v &amp; m0 就是将v的低位提取出来放到之前的数值之后。 这样就能够： 保持v的低位不变，高位持续加1，遍历所有扩展后的slot</p>
-<p>那么高位什么时候停止加1呢，就是while终止的条件</p>
-<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div></pre></td><td class="code"><pre><div class="line">while (v &amp; (m0 ^ m1))</div></pre></td></tr></table></figure>
-<p>由于m0和m1都是全为1的mask，假设m0=111， m1=11111， 那么m0 ^ m1 = 11000， 所以我们能看到当v的高位没有1了，其实就是说到头了，循环就会终止。</p>
-<h2 id="总结"><a href="#总结" class="headerlink" title="总结"></a>总结</h2><p>Redis的dictScan通过反向二进制位的遍历顺序，既能防止漏掉遍历元素，也能在必须要重复遍历元素的时候，减少重复元素的个数。 同时在处理rehash操作时的遍历的时候，通过各种位操作的结合，使得rehash过程中不会漏掉元素。</p>
-
-      
-    </div>
-    <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2017/08/02/Redis源码剖析-dict遍历算法/" data-id="cjgzvfyt70005ts68s4ex6wxb" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2017/08/24/Redis源码剖析-跳跃表/" data-id="cjhr1rzc8000iv368baxrjyvb" class="article-share-link">Share</a>
       
       
   <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
@@ -1030,6 +1115,10 @@
       <ul>
         
           <li>
+            <a href="/2018/05/10/Redis源码剖析-列表t-list实现/">Redis源码剖析--列表t_list实现</a>
+          </li>
+        
+          <li>
             <a href="/2018/05/09/Redis源码剖析-字符串t-string实现/">Redis源码剖析--字符串t_string实现</a>
           </li>
         
@@ -1043,10 +1132,6 @@
         
           <li>
             <a href="/2017/09/12/Redis源码剖析-字符串对象/">Redis源码剖析--字符串对象</a>
-          </li>
-        
-          <li>
-            <a href="/2017/09/07/Redis源码剖析-对象Object/">Redis源码剖析--对象Object</a>
           </li>
         
       </ul>
