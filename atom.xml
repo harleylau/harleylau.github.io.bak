@@ -5,7 +5,7 @@
   <link href="/atom.xml" rel="self"/>
   
   <link href="https://harleylau.github.io/"/>
-  <updated>2018-05-29T02:12:49.131Z</updated>
+  <updated>2018-06-01T02:12:56.606Z</updated>
   <id>https://harleylau.github.io/</id>
   
   <author>
@@ -14,6 +14,76 @@
   </author>
   
   <generator uri="http://hexo.io/">Hexo</generator>
+  
+  <entry>
+    <title>Redis源码剖析--quicklist</title>
+    <link href="https://harleylau.github.io/2018/05/31/Redis%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90-quicklist/"/>
+    <id>https://harleylau.github.io/2018/05/31/Redis源码剖析-quicklist/</id>
+    <published>2018-05-31T01:43:09.000Z</published>
+    <updated>2018-06-01T02:12:56.606Z</updated>
+    
+    <content type="html"><![CDATA[<h2 id="quicklist概述"><a href="#quicklist概述" class="headerlink" title="quicklist概述"></a>quicklist概述</h2><p>上一节中，我们有说到Redis中的列表对象在版本3.2之前，列表底层的编码是 ziplist 和 linkedlist 实现的， 但是在版本3.2之后，重新引入了一个 quicklist 的数据结构，列表的底层都由quicklist实现。</p>
+<p>在早期的设计中， 当列表对象中元素的长度比较小或者数量比较少的时候，采用ziplist来存储，当列表对象中元素的长度比较大或者数量比较多的时候，则会转而使用双向列表linkedlist来存储。</p>
+<p>这两种存储方式都各有优缺点</p>
+<ul>
+<li>双向链表linkedlist便于在表的两端进行push和pop操作，在插入节点上复杂度很低，但是它的内存开销比较大。首先，它在每个节点上除了要保存数据之外，还要额外保存两个指针；其次，双向链表的各个节点是单独的内存块，地址不连续，节点多了容易产生内存碎片。</li>
+<li>ziplist存储在一段连续的内存上，所以存储效率很高。但是，它不利于修改操作，插入和删除操作需要频繁的申请和释放内存。特别是当ziplist长度很长的时候，一次realloc可能会导致大批量的数据拷贝。</li>
+</ul>
+<p>早期版本在这边选择的折中方案是两种数据类型的转换，但是在3.2版本之后，不知道出于什么原因， 猜测会不会因为转换也是个费时且复杂的操作，引入了一种新的数据格式，结合了双向列表linkedlist和ziplist的特点，称之为quicklist。所有的节点都用quicklist存储，省去了到临界条件是的格式转换。</p>
+<p>那么quicklist是一种什么样的格式呢？简单的说，我们仍旧可以将其看作一个双向列表，但是列表的每个节点都是一个ziplist，其实就是linkedlist和ziplist的结合。quicklist中的每个节点ziplist都能够存储多个数据元素。</p>
+<h2 id="quicklist实现"><a href="#quicklist实现" class="headerlink" title="quicklist实现"></a>quicklist实现</h2><p>接下去我们看下quicklist的具体实现。</p>
+<p>quicklist的定义如下：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div></pre></td><td class="code"><pre><div class="line">typedef struct quicklist &#123;</div><div class="line">    quicklistNode *head;        // 指向quicklist的头部</div><div class="line">    quicklistNode *tail;        // 指向quicklist的尾部</div><div class="line">    unsigned long count;        // 列表中所有数据项的个数总和</div><div class="line">    unsigned int len;           // quicklist节点的个数，即ziplist的个数</div><div class="line">    int fill : 16;              // ziplist大小限定，由list-max-ziplist-size给定</div><div class="line">    unsigned int compress : 16; // 节点压缩深度设置，由list-compress-depth给定</div><div class="line">&#125; quicklist;</div></pre></td></tr></table></figure>
+<p>可以看到，这边其实有两个统计值，count用来统计所有数据项的个数总和，len用来统计quicklist的节点个数， 因为每个节点ziplist都能存储多个数据项，所以有了这两个统计值。</p>
+<p>另外，插一点，quicklist的这个结构体在源码中说是占用了32byte的空间，怎么计算的呢？这边涉及到了位域的概念，所谓”位域“是把一个字节中的二进位划分为几 个不同的区域， 并说明每个区域的位数。每个域有一个域名，允许在程序中按域名进行操作。比如这个“int fill : 16” 表示不用整个int存储fill，而是只用了其中的16位来存储。</p>
+<p>好了，回到正题。</p>
+<p>quicklist的节点node的定义如下： </p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div></pre></td><td class="code"><pre><div class="line">typedef struct quicklistNode &#123;</div><div class="line">    struct quicklistNode *prev;  // 指向上一个ziplist节点</div><div class="line">    struct quicklistNode *next;  // 指向下一个ziplist节点</div><div class="line">    unsigned char *zl;           // 数据指针，如果没有被压缩，就指向ziplist结构，反之指向quicklistLZF结构 </div><div class="line">    unsigned int sz;             // 表示指向ziplist结构的总长度(内存占用长度)</div><div class="line">    unsigned int count : 16;     // 表示ziplist中的数据项个数</div><div class="line">    unsigned int encoding : 2;   // 编码方式，1--ziplist，2--quicklistLZF</div><div class="line">    unsigned int container : 2;  // 预留字段，存放数据的方式，1--NONE，2--ziplist</div><div class="line">    unsigned int recompress : 1; // 解压标记，当查看一个被压缩的数据时，需要暂时解压，标记此参数为1，之后再重新进行压缩</div><div class="line">    unsigned int attempted_compress : 1; // 测试相关</div><div class="line">    unsigned int extra : 10; // 扩展字段，暂时没用</div><div class="line">&#125; quicklistNode;</div></pre></td></tr></table></figure>
+<p>这样， 我们就可以知道整个quicklist的结构</p>
+<p><img src="/2018/05/31/Redis源码剖析-quicklist/quicklist.jpg" alt="quicklist结构"></p>
+<p>图上显示了两种ziplist的结构，一种是经过压缩的，一种是未经压缩的。</p>
+<h2 id="quicklist操作"><a href="#quicklist操作" class="headerlink" title="quicklist操作"></a>quicklist操作</h2><h3 id="创建quicklist"><a href="#创建quicklist" class="headerlink" title="创建quicklist"></a>创建quicklist</h3><figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div></pre></td><td class="code"><pre><div class="line">/* Create a new quicklist.</div><div class="line"> * Free with quicklistRelease(). */</div><div class="line">quicklist *quicklistCreate(void) &#123;</div><div class="line">    struct quicklist *quicklist;</div><div class="line"></div><div class="line">    quicklist = zmalloc(sizeof(*quicklist));  // 分配空间</div><div class="line">    quicklist-&gt;head = quicklist-&gt;tail = NULL;  // 头尾指针为空</div><div class="line">    quicklist-&gt;len = 0;            // 列表长度为0</div><div class="line">    quicklist-&gt;count = 0;           // 数据项总和为0</div><div class="line">    quicklist-&gt;compress = 0;        // 设定压缩深度</div><div class="line">    quicklist-&gt;fill = -2;           // 设定ziplist大小</div><div class="line">    return quicklist;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>quicklist中的节点创建</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div></pre></td><td class="code"><pre><div class="line">REDIS_STATIC quicklistNode *quicklistCreateNode(void) &#123;</div><div class="line">    quicklistNode *node;</div><div class="line">    node = zmalloc(sizeof(*node));      // 分配空间</div><div class="line">    node-&gt;zl = NULL;                    // 初始化指向ziplist的指针</div><div class="line">    node-&gt;count = 0;                    // 数据项个数为0</div><div class="line">    node-&gt;sz = 0;                       // ziplist大小为0</div><div class="line">    node-&gt;next = node-&gt;prev = NULL;     // 前后指针为空</div><div class="line">    node-&gt;encoding = QUICKLIST_NODE_ENCODING_RAW;  // 节点编码方式</div><div class="line">    node-&gt;container = QUICKLIST_NODE_CONTAINER_ZIPLIST;     // 数据存放方式</div><div class="line">    node-&gt;recompress = 0;               // 初始化压缩标记</div><div class="line">    return node;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<h3 id="quicklist的push操作"><a href="#quicklist的push操作" class="headerlink" title="quicklist的push操作"></a>quicklist的push操作</h3><p>quicklist的push操作其实就是在双向列表的头节点或尾节点上插入一个新的元素。从上面我们知道，quicklist的每个节点都是一个ziplist，所以这个push操作就涉及到一个问题，当前节点的ziplist是否能够放进新元素。</p>
+<ul>
+<li>如果ziplist能够放入新元素，即大小没有超过限制（list-max-ziplist-size），那么直接调用ziplistPush函数压入</li>
+<li>如果ziplist不能放入新元素，则新建一个quicklist节点，即新的ziplist，新的数据项会被插入到新的ziplist，新的quicklist节点插入到原有的quicklist上</li>
+</ul>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div></pre></td><td class="code"><pre><div class="line">/* Wrapper to allow argument-based switching between HEAD/TAIL pop */</div><div class="line">void quicklistPush(quicklist *quicklist, void *value, const size_t sz,</div><div class="line">                   int where) &#123;</div><div class="line">    if (where == QUICKLIST_HEAD) &#123;</div><div class="line">        quicklistPushHead(quicklist, value, sz);</div><div class="line">    &#125; else if (where == QUICKLIST_TAIL) &#123;</div><div class="line">        quicklistPushTail(quicklist, value, sz);</div><div class="line">    &#125;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>函数里边， 根据是头部插入还是尾部插入调用不同的函数。先看头部插入的情况：</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div></pre></td><td class="code"><pre><div class="line">/* Add new entry to head node of quicklist.</div><div class="line"> *</div><div class="line"> * Returns 0 if used existing head.</div><div class="line"> * Returns 1 if new head created. */</div><div class="line">int quicklistPushHead(quicklist *quicklist, void *value, size_t sz) &#123;</div><div class="line">    quicklistNode *orig_head = quicklist-&gt;head;</div><div class="line">    if (likely(</div><div class="line">            // 判断头部节点是否能够插入新元素</div><div class="line">            _quicklistNodeAllowInsert(quicklist-&gt;head, quicklist-&gt;fill, sz))) &#123;</div><div class="line">        quicklist-&gt;head-&gt;zl =</div><div class="line">            // 如果能够插入，则执行ziplistPush插入新元素的当前节点的ziplist</div><div class="line">            ziplistPush(quicklist-&gt;head-&gt;zl, value, sz, ZIPLIST_HEAD);</div><div class="line">        // 更新头部大小</div><div class="line">        quicklistNodeUpdateSz(quicklist-&gt;head);</div><div class="line">    &#125; else &#123;</div><div class="line">        // 否则的话，需要创建新的quicklist节点</div><div class="line">        quicklistNode *node = quicklistCreateNode();</div><div class="line">        // 将新节点压入新创建的ziplist中，并与新创建的quicklist节点关联起来</div><div class="line">        node-&gt;zl = ziplistPush(ziplistNew(), value, sz, ZIPLIST_HEAD);</div><div class="line">        // 更新头部信息</div><div class="line">        quicklistNodeUpdateSz(node);</div><div class="line">        // 将新创建的节点插入到quicklist中</div><div class="line">        _quicklistInsertNodeBefore(quicklist, quicklist-&gt;head, node);</div><div class="line">    &#125;</div><div class="line">    // 更新quicklist的数据项个数</div><div class="line">    quicklist-&gt;count++;</div><div class="line">    // 更新头结点的数据项个数</div><div class="line">    quicklist-&gt;head-&gt;count++;</div><div class="line">    return (orig_head != quicklist-&gt;head);</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>在尾部插入数据的操作也是类似的， 不多具体介绍， 我们再看一下判断当前ziplist节点是否能插入的函数。</p>
+<figure class="highlight plain"><table><tr><td class="gutter"><pre><div class="line">1</div><div class="line">2</div><div class="line">3</div><div class="line">4</div><div class="line">5</div><div class="line">6</div><div class="line">7</div><div class="line">8</div><div class="line">9</div><div class="line">10</div><div class="line">11</div><div class="line">12</div><div class="line">13</div><div class="line">14</div><div class="line">15</div><div class="line">16</div><div class="line">17</div><div class="line">18</div><div class="line">19</div><div class="line">20</div><div class="line">21</div><div class="line">22</div><div class="line">23</div><div class="line">24</div><div class="line">25</div><div class="line">26</div><div class="line">27</div><div class="line">28</div><div class="line">29</div><div class="line">30</div><div class="line">31</div></pre></td><td class="code"><pre><div class="line">REDIS_STATIC int _quicklistNodeAllowInsert(const quicklistNode *node,</div><div class="line">                                           const int fill, const size_t sz) &#123;   // 判断当前node是否还能插入数据</div><div class="line">    if (unlikely(!node))</div><div class="line">        return 0;</div><div class="line"></div><div class="line">    int ziplist_overhead;</div><div class="line">    /* size of previous offset */</div><div class="line">    if (sz &lt; 254)   // 小于254时后一个节点的pre只有1字节,否则为5字节</div><div class="line">        ziplist_overhead = 1;</div><div class="line">    else</div><div class="line">        ziplist_overhead = 5;</div><div class="line"></div><div class="line">    /* size of forward offset */</div><div class="line">    if (sz &lt; 64)    // 小于64字节当前节点的encoding为1</div><div class="line">        ziplist_overhead += 1;</div><div class="line">    else if (likely(sz &lt; 16384))    // 小于16384 encoding为2字节</div><div class="line">        ziplist_overhead += 2;</div><div class="line">    else    // encoding为5字节</div><div class="line">        ziplist_overhead += 5;</div><div class="line"></div><div class="line">    /* new_sz overestimates if &apos;sz&apos; encodes to an integer type */</div><div class="line">    unsigned int new_sz = node-&gt;sz + sz + ziplist_overhead; // 忽略了连锁更新的情况</div><div class="line">    if (likely(_quicklistNodeSizeMeetsOptimizationRequirement(new_sz, fill)))   // // 校验fill为负数是否超过单存储限制</div><div class="line">        return 1;</div><div class="line">    else if (!sizeMeetsSafetyLimit(new_sz)) // 校验单个节点是否超过8kb，主要防止fill为正数时单个节点内存过大</div><div class="line">        return 0;</div><div class="line">    else if ((int)node-&gt;count &lt; fill)   // fill为正数是否超过存储限制</div><div class="line">        return 1;</div><div class="line">    else</div><div class="line">        return 0;</div><div class="line">&#125;</div></pre></td></tr></table></figure>
+<p>quicklist还能在指定的位置插入数据，quicklistInsertAfter和quicklistInsertBefore就是分别在指定位置后面和前面插入数据项。当然，和在头尾节点插入一样， 任意位置插入也是需要判断当前插入节点是否能够放得下当前的元素的，这边的情况会比头尾节点更为复杂，比如在当前节点放不下的时候，还需要检查一下旁边的节点是否能够放下这个数据，能够放下的话可以放置在旁边的节点上，如果也不行的话，就是需要新建一个ziplist节点。</p>
+<p>写到最后，发现虽然通篇在说每个节点ziplist能够容纳多个元素，但是没有具体介绍配置的参数。不过，从上边的分析也能看出来，这个是有quicklist的结构中的fill字段指定的， 这个fill字段会读取配置中的list-max-ziplist-size参数值。</p>
+<p>这个参数它可以取正值，也可以取负值。</p>
+<p>当取正值的时候，表示按照数据项个数来限定每个quicklist节点上的ziplist长度。比如，当这个参数配置成3的时候，表示每个quicklist节点的ziplist最多包含3个数据项。</p>
+<p>当取负值的时候，表示按照占用字节数来限定每个quicklist节点上的ziplist长度。这时，它只能取-1到-5这五个值，每个值含义如下：</p>
+<ul>
+<li>-5: 每个quicklist节点上的ziplist大小不能超过64 Kb。（注：1kb =&gt; 1024 bytes）</li>
+<li>-4: 每个quicklist节点上的ziplist大小不能超过32 Kb。</li>
+<li>-3: 每个quicklist节点上的ziplist大小不能超过16 Kb。</li>
+<li>-2: 每个quicklist节点上的ziplist大小不能超过8 Kb。（-2是Redis给出的默认值）</li>
+<li>-1: 每个quicklist节点上的ziplist大小不能超过4 Kb。</li>
+</ul>
+<p>还有一个参数list-compress-depth表示列表两头不压缩的节点的个数</p>
+<ul>
+<li>0 特殊值，表示不压缩</li>
+<li>1 表示quicklist两端各有一个节点不压缩，中间的节点压缩</li>
+<li>2 表示quicklist两端各有两个节点不压缩，中间的节点压缩</li>
+<li>3 表示quicklist两端各有三个节点不压缩，中间的节点压缩</li>
+</ul>
+]]></content>
+    
+    <summary type="html">
+    
+      &lt;h2 id=&quot;quicklist概述&quot;&gt;&lt;a href=&quot;#quicklist概述&quot; class=&quot;headerlink&quot; title=&quot;quicklist概述&quot;&gt;&lt;/a&gt;quicklist概述&lt;/h2&gt;&lt;p&gt;上一节中，我们有说到Redis中的列表对象在版本3.2之前，列表底层
+    
+    </summary>
+    
+    
+  </entry>
   
   <entry>
     <title>Redis源码剖析--列表t_list实现</title>
