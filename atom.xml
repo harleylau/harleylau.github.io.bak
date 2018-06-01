@@ -5,7 +5,7 @@
   <link href="/atom.xml" rel="self"/>
   
   <link href="https://harleylau.github.io/"/>
-  <updated>2018-06-01T02:12:56.606Z</updated>
+  <updated>2018-06-01T02:14:45.594Z</updated>
   <id>https://harleylau.github.io/</id>
   
   <author>
@@ -20,7 +20,7 @@
     <link href="https://harleylau.github.io/2018/05/31/Redis%E6%BA%90%E7%A0%81%E5%89%96%E6%9E%90-quicklist/"/>
     <id>https://harleylau.github.io/2018/05/31/Redis源码剖析-quicklist/</id>
     <published>2018-05-31T01:43:09.000Z</published>
-    <updated>2018-06-01T02:12:56.606Z</updated>
+    <updated>2018-06-01T02:14:45.594Z</updated>
     
     <content type="html"><![CDATA[<h2 id="quicklist概述"><a href="#quicklist概述" class="headerlink" title="quicklist概述"></a>quicklist概述</h2><p>上一节中，我们有说到Redis中的列表对象在版本3.2之前，列表底层的编码是 ziplist 和 linkedlist 实现的， 但是在版本3.2之后，重新引入了一个 quicklist 的数据结构，列表的底层都由quicklist实现。</p>
 <p>在早期的设计中， 当列表对象中元素的长度比较小或者数量比较少的时候，采用ziplist来存储，当列表对象中元素的长度比较大或者数量比较多的时候，则会转而使用双向列表linkedlist来存储。</p>
@@ -82,6 +82,10 @@
     
     </summary>
     
+    
+      <category term="redis" scheme="https://harleylau.github.io/tags/redis/"/>
+    
+      <category term="源码" scheme="https://harleylau.github.io/tags/%E6%BA%90%E7%A0%81/"/>
     
   </entry>
   

@@ -6,13 +6,14 @@
   <title>Redis源码剖析--quicklist | Harley_Lau</title>
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
   <meta name="description" content="quicklist概述上一节中，我们有说到Redis中的列表对象在版本3.2之前，列表底层的编码是 ziplist 和 linkedlist 实现的， 但是在版本3.2之后，重新引入了一个 quicklist 的数据结构，列表的底层都由quicklist实现。 在早期的设计中， 当列表对象中元素的长度比较小或者数量比较少的时候，采用ziplist来存储，当列表对象中元素的长度比较大或者数量比较多的">
+<meta name="keywords" content="redis,源码">
 <meta property="og:type" content="article">
 <meta property="og:title" content="Redis源码剖析--quicklist">
 <meta property="og:url" content="https://harleylau.github.io/2018/05/31/Redis源码剖析-quicklist/index.html">
 <meta property="og:site_name" content="Harley_Lau">
 <meta property="og:description" content="quicklist概述上一节中，我们有说到Redis中的列表对象在版本3.2之前，列表底层的编码是 ziplist 和 linkedlist 实现的， 但是在版本3.2之后，重新引入了一个 quicklist 的数据结构，列表的底层都由quicklist实现。 在早期的设计中， 当列表对象中元素的长度比较小或者数量比较少的时候，采用ziplist来存储，当列表对象中元素的长度比较大或者数量比较多的">
 <meta property="og:image" content="https://harleylau.github.io/2018/05/31/Redis源码剖析-quicklist/quicklist.jpg">
-<meta property="og:updated_time" content="2018-06-01T02:12:56.606Z">
+<meta property="og:updated_time" content="2018-06-01T02:14:45.594Z">
 <meta name="twitter:card" content="summary">
 <meta name="twitter:title" content="Redis源码剖析--quicklist">
 <meta name="twitter:description" content="quicklist概述上一节中，我们有说到Redis中的列表对象在版本3.2之前，列表底层的编码是 ziplist 和 linkedlist 实现的， 但是在版本3.2之后，重新引入了一个 quicklist 的数据结构，列表的底层都由quicklist实现。 在早期的设计中， 当列表对象中元素的长度比较小或者数量比较少的时候，采用ziplist来存储，当列表对象中元素的长度比较大或者数量比较多的">
@@ -143,9 +144,11 @@
       
     </div>
     <footer class="article-footer">
-      <a data-url="https://harleylau.github.io/2018/05/31/Redis源码剖析-quicklist/" data-id="cjhvc3fp300043m68nm6ljzhv" class="article-share-link">Share</a>
+      <a data-url="https://harleylau.github.io/2018/05/31/Redis源码剖析-quicklist/" data-id="cjhvc66og00034r68evsixjkp" class="article-share-link">Share</a>
       
       
+  <ul class="article-tag-list"><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/redis/">redis</a></li><li class="article-tag-list-item"><a class="article-tag-list-link" href="/tags/源码/">源码</a></li></ul>
+
     </footer>
   </div>
   
